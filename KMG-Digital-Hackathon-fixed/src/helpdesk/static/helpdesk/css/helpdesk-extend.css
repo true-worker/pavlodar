@@ -1,0 +1,129 @@
+/* Bootstrap overrides */
+@import "helpdesk-customize.css";
+
+/* Bootstrap 5 underlines links by default; restore Bootstrap 4 behaviour */
+a:not(.btn) {
+  text-decoration: none;
+}
+
+.breadcrumb {
+  padding: 0.75rem 1rem;
+  border-radius: 0.25rem;
+}
+
+.btn-file {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-file input[type="file"] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 100%;
+  min-height: 100%;
+  font-size: 100px;
+  text-align: right;
+  filter: alpha(opacity=0);
+  opacity: 0;
+  outline: none;
+  background: white;
+  cursor: inherit;
+  display: block;
+}
+
+.errorlist {
+  list-style: none;
+  padding: 0;
+  color: red;
+}
+
+.has-error .input-group input,
+.has-error .input-group select,
+.has-error .input-group textarea {
+  border-color: #b94a48;
+}
+
+.followup.well {
+  background-color: #f4f5ff;
+}
+
+.followup {
+  padding: 20px;
+  margin: 30px;
+}
+
+img.brand {
+  padding-right: 30px;
+}
+
+div.card-body img {
+  max-width: 900px;
+}
+
+pre {
+  background: #eee;
+  padding: 1em;
+  border: 1pt solid white;
+}
+
+/* Ticket titles wrap onto several lines rather than being cut off with an
+   ellipsis, so the whole title is readable without hovering over it. */
+table .tickettitle {
+  max-width: 30rem;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* On the ticket list the title column is the one worth reading, so give it a
+   floor to grow into instead of letting the narrower columns squeeze it. */
+#ticketTable .tickettitle {
+  min-width: 18rem;
+}
+
+.handle {
+  cursor: grab;
+}
+
+/* hide google translate top bar */
+.goog-te-banner-frame {
+  display: none !important;
+}
+
+.goog-te-balloon-frame {
+  display: none !important;
+}
+
+/* hide google translate tooltips (generated for every translated item) */
+.goog-tooltip {
+  display: none !important;
+}
+
+/* header */
+#dropdown li.headerlink {
+  width: auto;
+  float: left;
+  text-align: center;
+}
+
+/* query list */
+#dropdown li.headerlink ul {
+  display: none;
+  text-align: left;
+  position: absolute;
+  padding: 5px;
+  z-index: 2;
+}
+
+/* query entries */
+#dropdown li.headerlink:hover ul {
+  display: block;
+  width: auto;
+}
+
+#dropdown li.headerlink:hover ul li {
+  padding: 5px;
+  margin: 1px;
+  float: none;
+  display: block;
+}

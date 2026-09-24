@@ -291,6 +291,8 @@ def write_results(
     base = "run-status" if external_error else "report"
     _write(output / f"{base}.json", json.dumps(safe_report, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     _write(output / f"{base}.md", redactor(_markdown(safe_report)))
+    from .html_report import render
+    _write(output / f"{base}.html", redactor(render(safe_report)))
     _write(output / "manifest.json", json.dumps(safe_manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     log = [
         f"result={safe_report['result']} exit_code={code}",

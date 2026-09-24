@@ -7,6 +7,12 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      target_folder:
+        description: 'Папка проекта в этом репозитории'
+        required: false
+        default: 'KMG-Digital-Hackathon'
+        type: choice
+        options: [KMG-Digital-Hackathon, KMG-Digital-Hackathon-fixed]
       target_repository:
         description: 'Проверяемый репозиторий owner/name (пусто — папка KMG-Digital-Hackathon этого репозитория)'
         required: false
@@ -97,10 +103,15 @@ jobs:
         id: target
         env:
           TARGET_PATH: ${{ inputs.target_path }}
+          TARGET_FOLDER: ${{ inputs.target_folder }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           case "$TARGET_PATH" in *..*) echo "::error::target_path must not contain .."; exit 2;; esac
           if [ -d external-target ]; then
             dir="$GITHUB_WORKSPACE/external-target/$TARGET_PATH"
+          elif [ "$TARGET_FOLDER" = "KMG-Digital-Hackathon-fixed" ] || { [ -z "$TARGET_FOLDER" ] && [[ "$BRANCH" == demo/fixed* ]]; }; then
+            # Демонстрация: исправленная командой копия проекта должна пройти проверку (код 0)
+            dir="$GITHUB_WORKSPACE/KMG-Digital-Hackathon-fixed"
           else
             dir="$GITHUB_WORKSPACE/KMG-Digital-Hackathon"
           fi

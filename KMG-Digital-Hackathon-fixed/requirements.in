@@ -1,0 +1,16 @@
+Django>=5.2,<5.3
+django-cleanup
+email-reply-parser
+markdown
+beautifulsoup4
+nh3
+djangorestframework
+django-model-utils
+oauthlib
+requests-oauthlib
+requests
+cryptography
+argon2-cffi
+whitenoise
+waitress
+pywin32; sys_platform == 'win32'

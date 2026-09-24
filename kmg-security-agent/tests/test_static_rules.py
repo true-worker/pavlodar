@@ -196,6 +196,21 @@ class StaticRuleTests(unittest.TestCase):
                          ['ECDHE-RSA-AES128-SHA', 'AES128-GCM-SHA256', 'HIGH'])
 
 
+class HtmlReportTests(unittest.TestCase):
+    def test_html_is_self_contained_and_escaped(self):
+        from kmg_security_agent import html_report
+        report = {'result': 'violations_found', 'exit_code': 1, 'finding_count': 1, 'violated_requirement_ids': ['ИБ-01'],
+                  'timing': {}, 'metadata': {}, 'target': {}, 'usage': {}, 'errors': [], 'limitations': [],
+                  'requirements': [{'requirement_id': 'ИБ-01', 'title': 't', 'status': 'violated'}],
+                  'findings': [{'requirement_id': 'ИБ-01', 'title': '<b>x</b>', 'severity': 'high', 'explanation': 'e',
+                                'recommendation': 'r', 'evidence': [{'path': 'a.py', 'start_line': 1, 'end_line': 1,
+                                                                     'quote': '</pre><script>alert(1)</script>'}]}]}
+        page = html_report.render(report)
+        self.assertNotIn('<script>alert', page)
+        self.assertIn('&lt;script&gt;alert(1)&lt;/script&gt;', page)
+        self.assertNotRegex(page, r'(src|href)="https?://')
+
+
 class CombineTests(unittest.TestCase):
     def test_llm_findings_are_merged_without_duplicates(self):
         static = {'checks': [{'requirement_id': rid, 'status': 'no_violations_found', 'rationale': 'r', 'findings': [],

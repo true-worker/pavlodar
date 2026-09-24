@@ -1,0 +1,1 @@
+{% extends 'portal/base.html' %}{% block content %}<h1>{{ title|default:'Смена пароля' }}</h1><form class="narrow" method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button>Сохранить</button></form>{% endblock %}

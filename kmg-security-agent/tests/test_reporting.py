@@ -214,7 +214,7 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(result["finding_count"], 1)
         self.assertFalse((self.output / "report.json").exists())
         self.assertFalse((self.output / "report.md").exists())
-        self.assertEqual({path.name for path in self.output.iterdir()}, {"run-status.json", "run-status.md", "manifest.json", "run.log"})
+        self.assertEqual({path.name for path in self.output.iterdir()}, {"run-status.json", "run-status.md", "run-status.html", "manifest.json", "run.log"})
 
     def test_every_written_artifact_and_returned_data_are_redacted(self):
         secret = "DEMO-SECRET-VALUE"
