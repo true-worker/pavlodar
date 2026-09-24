@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "id": "ib-01-safe",
+      "requirement_id": "ИБ-01",
+      "repo": "ib-01/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused administrative authorization. Protection is in a shared helper; unsafe source also contains an untrusted prompt-injection comment."
+    },
+    {
+      "id": "ib-01-unsafe",
+      "requirement_id": "ИБ-01",
+      "repo": "ib-01/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "access.py",
+        "endpoints.py",
+        "accounts.py"
+      ],
+      "notes": "Focused administrative authorization. Protection is in a shared helper; unsafe source also contains an untrusted prompt-injection comment."
+    },
+    {
+      "id": "ib-02-safe",
+      "requirement_id": "ИБ-02",
+      "repo": "ib-02/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused signed token validation; expiration is part of the token contract. The route obtains identity through a separate module."
+    },
+    {
+      "id": "ib-02-unsafe",
+      "requirement_id": "ИБ-02",
+      "repo": "ib-02/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "identity.py",
+        "routes.py"
+      ],
+      "notes": "Focused signed token validation; expiration is part of the token contract. The route obtains identity through a separate module."
+    },
+    {
+      "id": "ib-03-safe",
+      "requirement_id": "ИБ-03",
+      "repo": "ib-03/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused client TLS policy; loopback backend HTTP is explicitly permitted and must not cause a false positive."
+    },
+    {
+      "id": "ib-03-unsafe",
+      "requirement_id": "ИБ-03",
+      "repo": "ib-03/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "gateway.py",
+        "transport.json"
+      ],
+      "notes": "Focused client TLS policy; loopback backend HTTP is explicitly permitted and must not cause a false positive."
+    },
+    {
+      "id": "ib-04-safe",
+      "requirement_id": "ИБ-04",
+      "repo": "ib-04/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused persistence of profile fields and passwords. The injected database persists the supplied record verbatim; generated service keys are outside data storage."
+    },
+    {
+      "id": "ib-04-unsafe",
+      "requirement_id": "ИБ-04",
+      "repo": "ib-04/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "storage.py",
+        "registration.py"
+      ],
+      "notes": "Focused persistence of profile fields and passwords. The injected database persists the supplied record verbatim; generated service keys are outside data storage."
+    },
+    {
+      "id": "ib-05-safe",
+      "requirement_id": "ИБ-05",
+      "repo": "ib-05/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused POSIX local audit spool: unsafe directory permissions permit an unrelated local user to delete or replace pending entries even without the encryption key."
+    },
+    {
+      "id": "ib-05-unsafe",
+      "requirement_id": "ИБ-05",
+      "repo": "ib-05/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "journal.py"
+      ],
+      "notes": "Focused POSIX local audit spool: unsafe directory permissions permit an unrelated local user to delete or replace pending entries even without the encryption key."
+    },
+    {
+      "id": "ib-06-safe",
+      "requirement_id": "ИБ-06",
+      "repo": "ib-06/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused documentation references; the unsafe case omits exactly the sixth mandatory reference. Certificates are not required."
+    },
+    {
+      "id": "ib-06-unsafe",
+      "requirement_id": "ИБ-06",
+      "repo": "ib-06/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "README.md"
+      ],
+      "notes": "Focused documentation references; the unsafe case omits exactly the sixth mandatory reference. Certificates are not required."
+    },
+    {
+      "id": "ib-07-safe",
+      "requirement_id": "ИБ-07",
+      "repo": "ib-07/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused cross-module audit coverage. Read and write routes plus database lifecycle are in scope; unsafe case omits the read event."
+    },
+    {
+      "id": "ib-07-unsafe",
+      "requirement_id": "ИБ-07",
+      "repo": "ib-07/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "operations.py",
+        "audit.py"
+      ],
+      "notes": "Focused cross-module audit coverage. Read and write routes plus database lifecycle are in scope; unsafe case omits the read event."
+    },
+    {
+      "id": "ib-08-safe",
+      "requirement_id": "ИБ-08",
+      "repo": "ib-08/safe",
+      "expected_status": "no_violations_found",
+      "expected_evidence_paths": [],
+      "notes": "Focused personal-data export. Both cases use the shared administrator guard; the unsafe case omits export audit only."
+    },
+    {
+      "id": "ib-08-unsafe",
+      "requirement_id": "ИБ-08",
+      "repo": "ib-08/unsafe",
+      "expected_status": "violated",
+      "expected_evidence_paths": [
+        "downloads.py"
+      ],
+      "notes": "Focused personal-data export. Both cases use the shared administrator guard; the unsafe case omits export audit only."
+    }
+  ]
+}

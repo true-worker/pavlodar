@@ -1,0 +1,7 @@
+{
+  "minimum_tls": "TLSv1",
+  "ciphers": "AES128-SHA",
+  "redirect_http": false,
+  "backend_host": "127.0.0.1",
+  "backend_protocol": "http"
+}

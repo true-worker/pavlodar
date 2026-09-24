@@ -1,0 +1,126 @@
+name: Pavlodar security checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: kmg-security-agent
+
+env:
+  PYTHONPATH: ${{ github.workspace }}/kmg-security-agent/src
+  PYTHONDONTWRITEBYTECODE: '1'
+  GIT_OPTIONAL_LOCKS: '0'
+
+jobs:
+  tests:
+    name: Offline agent tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - run: python -m unittest discover -s tests -v
+
+  configuration:
+    name: Check whether live analysis is configured
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      ready: ${{ steps.key.outputs.ready }}
+    steps:
+      - id: key
+        working-directory: ${{ github.workspace }}
+        env:
+          MODEL_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$MODEL_API_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo 'Live security analysis is not configured: add OPENROUTER_API_KEY to repository Actions secrets.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Offline tests can run; no security verdict or release permission is produced.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  security-check:
+    name: Review KMG source with Qwen
+    needs: [tests, configuration]
+    if: needs.configuration.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      exit_code: ${{ steps.scan.outputs.exit_code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Make target sources read-only
+        run: chmod -R a-w "$GITHUB_WORKSPACE/KMG-Digital-Hackathon"
+      - name: Analyze the target from this exact commit
+        id: scan
+        timeout-minutes: 28
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'qwen/qwen3.8-27b:free' }}
+          OPENROUTER_BASE_URL: ${{ vars.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1' }}
+        run: |
+          set +e
+          python -m kmg_security_agent scan \
+            --repo "$GITHUB_WORKSPACE/KMG-Digital-Hackathon" \
+            --output "$GITHUB_WORKSPACE/reports/security" \
+            --timeout 1560 --request-timeout 180 --max-requests 25
+          result=$?
+          echo "exit_code=$result" >> "$GITHUB_OUTPUT"
+          exit "$result"
+      - name: Preserve CI status on failures
+        if: always()
+        working-directory: ${{ github.workspace }}
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          SCAN_EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
+          CHECKED_COMMIT: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          folder = Path('reports')
+          folder.mkdir(exist_ok=True)
+          data = {'kind': 'ci_diagnostics', 'commit': os.environ['CHECKED_COMMIT'],
+                  'scan_outcome': os.environ.get('SCAN_OUTCOME'),
+                  'scan_exit_code': os.environ.get('SCAN_EXIT_CODE') or None}
+          (folder / 'ci-status.json').write_text(json.dumps(data, indent=2) + '\n')
+          PY
+      - name: Upload reports and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Restore permissions for checkout cleanup
+        if: always()
+        run: chmod -R u+w "$GITHUB_WORKSPACE/KMG-Digital-Hackathon"
+
+  release-check:
+    name: Demo release permission
+    needs: security-check
+    if: needs.security-check.result == 'success' && needs.security-check.outputs.exit_code == '0'
+    runs-on: ubuntu-latest
+    steps:
+      - working-directory: ${{ github.workspace }}
+        run: echo 'All mandatory security checks passed; the next step is permitted. This demo does not deploy a service.'

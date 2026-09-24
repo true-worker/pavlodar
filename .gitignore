@@ -1,0 +1,30 @@
+# Credentials and local settings, at any depth
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials.json
+# Local Python/application data
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+runtime/
+reports/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+# Operating system files
+.DS_Store
+Thumbs.db

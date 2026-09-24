@@ -1,0 +1,7 @@
+[project]
+name = "service-desk"
+version = "1.0.0"
+description = "Учебная служба поддержки"
+requires-python = ">=3.14,<3.15"
+readme = "README.md"
+license = "BSD-3-Clause"

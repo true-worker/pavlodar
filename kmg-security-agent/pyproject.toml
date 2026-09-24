@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kmg-security-agent"
+version = "0.1.0"
+description = "Console security review of Python/Django repositories with Qwen"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+kmg-agent = "kmg_security_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+kmg_security_agent = ["resources/*.json", "resources/*.md", "resources/skills/*.md"]

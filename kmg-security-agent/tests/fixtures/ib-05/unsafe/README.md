@@ -1,0 +1,2 @@
+# Local audit boundary
+This focused fixture runs as a dedicated POSIX service account. Application users and the separate unprivileged local reader are not this account, are not root and receive no extra ACLs. SERVICE_PRIVATE_ROOT is created under a service-controlled parent. initialize runs before append or forward. The receiver is a separate trusted service. Scope: the encrypted local pending buffer before acceptance.

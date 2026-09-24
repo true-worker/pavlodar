@@ -1,0 +1,102 @@
+{% extends "helpdesk/base.html" %}{% load i18n %}
+
+{% block helpdesk_title %}{% translate "Reports &amp; Statistics" %}{% endblock %}
+
+{% block helpdesk_breadcrumb %}
+<li class="breadcrumb-item">
+    <a href="{% url 'helpdesk:report_index' %}">{% translate "Reports &amp; Statistics" %}</a>
+</li>
+<li class="breadcrumb-item active">Overview</li>
+{% endblock %}
+
+{% block helpdesk_body %}
+<h2>{% translate "Reports &amp; Statistics" %}</h2>
+
+{% if number_tickets == 0 %}
+<p>{% translate "You haven't created any tickets yet, so you cannot run any reports." %}</p>
+{% else %}
+
+<div class="card mb-3">
+    <div class="card-header">
+        <i class="fas fa-info-circle"></i>
+        {% translate "Current Ticket Stats" %}
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-bordered table-hover">
+                <tbody>
+                    <tr>
+                        <td>{% translate "Average number of days until ticket is closed (all tickets): " %}</td>
+                        <td><strong style="color: red;">{{ basic_ticket_stats.average_nbr_days_until_ticket_closed|floatformat:2 }}</strong>.</td>
+                    </tr>
+                    <tr>
+                        <td>{% translate "Average number of days until ticket is closed (tickets opened in last 60 days): " %}</td>
+                        <td><strong style="color: red;">{{ basic_ticket_stats.average_nbr_days_until_ticket_closed_last_60_days|floatformat:2 }}</strong>. {% translate "Click" %} <strong><a href="{% url 'helpdesk:report_index' %}daysuntilticketclosedbymonth">here</a></strong> {% translate "for detailed average by month." %} </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <!-- /.table-responsive -->
+        <div class="table-responsive">
+            <table class="table table-striped table-bordered table-hover">
+                <thead>
+                    <tr>
+                        <th>{% translate "Queue" %}</th>
+                        <th>{% translate "Open" %}</th>
+                        <th>{% translate "Resolved" %}</th>
+                        <th>{% translate "Closed" %}</th>
+                        {% if helpdesk_settings.HELPDESK_ENABLE_TIME_SPENT_ON_TICKET %}<th>{% translate "Time spent" %}</th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for queue in dash_tickets %}
+                    <tr>{% url 'helpdesk:list' as hdlist %}
+                        <td><a href='{{ hdlist }}?queue={{ queue.queue }}&status=1&status=2'>{{ queue.name }}</a></td>
+                        <td>{% if queue.open %}<a href='{{ hdlist }}?queue={{ queue.queue }}&status=1&status=2'>{% endif %}{{ queue.open }}{% if queue.open %}</a>{% endif %}</td>
+                        <td>{% if queue.resolved %}<a href='{{ hdlist }}?queue={{ queue.queue }}&status=3'>{% endif %}{{ queue.resolved }}{% if queue.resolved %}</a>{% endif %}</td>
+                        <td>{% if queue.closed %}<a href='{{ hdlist }}?queue={{ queue.queue }}&status=4'>{% endif %}{{ queue.closed }}{% if queue.closed %}</a>{% endif %}</td>
+                        {% if helpdesk_settings.HELPDESK_ENABLE_TIME_SPENT_ON_TICKET %}<td>{{ queue.time_spent }}{% if queue.dedicated_time %} / {{ queue.dedicated_time }}{% endif %}</td>{% endif %}
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan='6'>{% translate "There are no unassigned tickets." %}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <!-- /.table-responsive -->
+    </div>
+    <!-- /.card-body -->
+</div>
+<!-- /.card -->
+
+<div class="card mb-3">
+    <div class="card-header">
+        <i class="fas fa-print"></i>
+        {% translate "Generate Report" %}
+    </div>
+    <div class="card-body">
+        <ul>
+            <li>{% translate "Reports By User" %}
+                <ul>
+                    <li><a href='userpriority/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "by Priority" %}</a></li>
+                    <li><a href='userqueue/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "by Queue" %}</a></li>
+                    <li><a href='userstatus/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "by Status" %}</a></li>
+                    <li><a href='usermonth/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "by Month" %}</a></li>
+                </ul>
+            </li>
+            <li>{% translate "Reports By Queue" %}
+                <ul>
+                    <li><a href='queuepriority/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "by Priority" %}</a></li>
+                    <li><a href='queuestatus/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "by Status" %}</a></li>
+                    <li><a href='queuemonth/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "by Month" %}</a></li>
+                    <li><a href='daysuntilticketclosedbymonth/{% if saved_query %}?saved_query={{ saved_query }}{% endif %}'>{% translate "Days until ticket closed by Month" %}</a></li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+    <!-- /.card-body -->
+</div>
+<!-- /.card -->
+
+{% endif %}
+{% endblock %}

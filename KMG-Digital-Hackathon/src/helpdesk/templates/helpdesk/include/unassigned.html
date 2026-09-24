@@ -1,0 +1,170 @@
+{% load i18n humanize %}
+
+<div class="card mb-3" id="unassigned-table">
+    <div class="card-header">
+        <i class="fas fa-table"></i>
+        {% translate "Unassigned Tickets" %} {% translate "(pick up a ticket if you start to work on it)" %}
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm table-striped" id="dataTable" width="100%" cellspacing="0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>
+                            {% if unassigned_tickets_sort %}
+                                {% with current=unassigned_tickets_sort %}
+                                    {% if current == 'id' %}
+                                        <a href="?una_sort=-id&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Ticket" %} <i class="fas fa-sort-up"></i></a>
+                                    {% elif current == '-id' %}
+                                        <a href="?una_sort=id&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Ticket" %} <i class="fas fa-sort-down"></i></a>
+                                    {% else %}
+                                        <a href="?una_sort=id&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Ticket" %} <i class="fas fa-sort"></i></a>
+                                    {% endif %}
+                                {% endwith %}
+                            {% else %}
+                                {% translate "Ticket" %}
+                            {% endif %}
+                        </th>
+                        <th>
+                            {% if unassigned_tickets_sort %}
+                                {% with current=unassigned_tickets_sort %}
+                                    {% if current == 'priority' %}
+                                        <a href="?una_sort=-priority&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Priority" %} <i class="fas fa-sort-up"></i></a>
+                                    {% elif current == '-priority' %}
+                                        <a href="?una_sort=priority&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Priority" %} <i class="fas fa-sort-down"></i></a>
+                                    {% else %}
+                                        <a href="?una_sort=priority&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Priority" %} <i class="fas fa-sort"></i></a>
+                                    {% endif %}
+                                {% endwith %}
+                            {% else %}
+                                {% translate "Priority" %}
+                            {% endif %}
+                        </th>
+                        <th>
+                            {% if unassigned_tickets_sort %}
+                                {% with current=unassigned_tickets_sort %}
+                                    {% if current == 'queue' %}
+                                        <a href="?una_sort=-queue&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Queue" %} <i class="fas fa-sort-up"></i></a>
+                                    {% elif current == '-queue' %}
+                                        <a href="?una_sort=queue&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Queue" %} <i class="fas fa-sort-down"></i></a>
+                                    {% else %}
+                                        <a href="?una_sort=queue&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Queue" %} <i class="fas fa-sort"></i></a>
+                                    {% endif %}
+                                {% endwith %}
+                            {% else %}
+                                {% translate "Queue" %}
+                            {% endif %}
+                        </th>
+                        <th>
+                            {% if unassigned_tickets_sort %}
+                                {% with current=unassigned_tickets_sort %}
+                                    {% if current == 'created' %}
+                                        <a href="?una_sort=-created&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Created" %} <i class="fas fa-sort-up"></i></a>
+                                    {% elif current == '-created' %}
+                                        <a href="?una_sort=created&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Created" %} <i class="fas fa-sort-down"></i></a>
+                                    {% else %}
+                                        <a href="?una_sort=created&{{ page_var }}=1#unassigned-table" class="text-dark">{% translate "Created" %} <i class="fas fa-sort"></i></a>
+                                    {% endif %}
+                                {% endwith %}
+                            {% else %}
+                                {% translate "Created" %}
+                            {% endif %}
+                        </th>
+                        <th>{% translate "Actions" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ticket in unassigned_tickets %}
+                        <tr class="{{ ticket.get_priority_css_class }}">
+                            <td class="tickettitle"><a href='{{ ticket.get_absolute_url }}'>{{ ticket.id }}. {{ ticket.title }} </a></td>
+                            <td>{{ ticket.priority }}</td>
+                            <td>{{ ticket.queue }}</td>
+                            <td><span title='{{ ticket.created|date:"DATETIME_FORMAT" }}'>{{ ticket.created|naturaltime }}</span></td>
+                            <td class="text-center">
+                                <a href='{{ ticket.get_absolute_url }}?take'><button class='btn btn-primary btn-sm'><i class="fas fa-hand-paper"></i>&nbsp;{% translate "Take" %}</button></a>
+                                <a href='{% url 'helpdesk:delete' ticket.id %}?next=dashboard'><button class='btn btn-danger btn-sm'><i class="fas fa-trash"></i>&nbsp;{% translate "Delete" %}</button></a>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan='6'>{% translate "There are no unassigned tickets." %}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <!-- /.table-responsive -->
+        {% if unassigned_tickets.has_other_pages %}
+            <ul class="pagination">
+                <!-- if we aren't on page one, go back to start and go back one controls -->
+                {% if unassigned_tickets.has_previous %}
+                    <li><a href="?{{ page_var }}=1{% if unassigned_tickets_sort %}&una_sort={{ unassigned_tickets_sort }}{% endif %}#unassigned-table">&laquo;&laquo;</a></li>
+                    <li><a href="?{{ page_var }}={{ unassigned_tickets.previous_page_number }}{% if unassigned_tickets_sort %}&una_sort={{ unassigned_tickets_sort }}{% endif %}#unassigned-table">&laquo;</a></li>
+                {% else %}
+                    <li class="disabled"><span>&laquo;&laquo;</span></li>
+                    <li class="disabled"><span>&laquo;</span></li>
+                {% endif %}
+                <!-- other pages, set thresh to the number to show before and after active -->
+                {% with 5 as thresh %}
+                    {% for i in unassigned_tickets.paginator.page_range %}
+                        {% if unassigned_tickets.number == i %}
+                            <li class="active"><span>{{ i }} <span class="visually-hidden">(current)</span></span></li>
+                        {% elif i <= unassigned_tickets.number|add:5 and i >= unassigned_tickets.number|add:-5 %}
+                            <li><a href="?{{ page_var }}={{ i }}{% if unassigned_tickets_sort %}&una_sort={{ unassigned_tickets_sort }}{% endif %}#unassigned-table">{{ i }}</a></li>
+                        {% endif %}
+                    {% endfor %}
+                {% endwith %}
+                <!-- if we aren't on the last page, go forward one and go to end controls -->
+                {% if unassigned_tickets.has_next %}
+                    <li><a href="?{{ page_var }}={{ unassigned_tickets.next_page_number }}{% if unassigned_tickets_sort %}&una_sort={{ unassigned_tickets_sort }}{% endif %}#unassigned-table">&raquo;</a></li>
+                    <li><a href="?{{ page_var }}={{ unassigned_tickets.paginator.num_pages }}{% if unassigned_tickets_sort %}&una_sort={{ unassigned_tickets_sort }}{% endif %}#unassigned-table">&raquo;&raquo;</a></li>
+                {% else %}
+                    <li class="disabled"><span>&raquo;</span></li>
+                    <li class="disabled"><span>&raquo;&raquo;</span></li>
+                {% endif %}
+            </ul>
+        {% endif %}
+    </div>
+    <div class="card-footer small text-muted">Listing {{ unassigned_tickets|length }} ticket(s).</div>
+</div>
+
+{% for kbitem in kbitems %}
+    {% if kbitem.unassigned_tickets %}
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="fas fa-table"></i>
+                {% translate "KBItem:" %} {{kbitem.title}} {% translate "Team:" %} {{kbitem.get_team.name}} {% translate "(pick up a ticket if you start to work on it)" %}
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm table-striped" id="dataTable" width="100%" cellspacing="0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>{% translate "Ticket" %}</th>
+                                <th>{% translate "Priority" %}</th>
+                                <th>{% translate "Queue" %}</th>
+                                <th>{% translate "Created" %}</th>
+                                <th>{% translate "Actions" %}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ticket in kbitem.unassigned_tickets %}
+                                <tr class="{{ ticket.get_priority_css_class }}">
+                                    <td class="tickettitle"><a href='{{ ticket.get_absolute_url }}'>{{ ticket.id }}. {{ ticket.title }} </a></td>
+                                    <td>{{ ticket.priority }}</td>
+                                    <td>{{ ticket.queue }}</td>
+                                    <td><span title='{{ ticket.created|date:"DATETIME_FORMAT" }}'>{{ ticket.created|naturaltime }}</span></td>
+                                    <td class="text-center">
+                                        <a href='{{ ticket.get_absolute_url }}?take'><button class='btn btn-primary btn-sm'><i class="fas fa-hand-paper"></i>&nbsp;{% translate "Take" %}</button></a>
+                                        <a href='{% url 'helpdesk:delete' ticket.id %}?next=dashboard'><button class='btn btn-danger btn-sm'><i class="fas fa-trash"></i>&nbsp;{% translate "Delete" %}</button></a>
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan='6'>{% translate "There are no unassigned tickets." %}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer small text-muted">Listing {{ kbitem.unassigned_tickets|length }} ticket(s).</div>
+        </div>
+    {% endif %}
+{% endfor %}

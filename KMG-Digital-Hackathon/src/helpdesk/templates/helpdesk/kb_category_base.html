@@ -1,0 +1,93 @@
+{% load i18n %}
+
+<article class="m-md-3">
+  {% block header %}
+    <div class="d-flex align-items-center">
+      <h2>{% blocktranslate with category.title as kbcat %}{{ kbcat }}{% endblocktranslate %}</h2>
+      {% if category.queue %}
+        {% if iframe %}
+          <a href="{% url 'helpdesk:submit_iframe' %}?queue={{ category.queue.pk }}&_readonly_fields_=queue&{{ query_param_string }}"
+             class="btn bg-body-tertiary border ms-auto">
+            {% translate "Contact a human" %}
+            <i class="fa fa-envelope ms-2"></i>
+          </a>
+        {% else %}
+          {# Create ticket link #}
+          <a href="{% url 'helpdesk:submit' %}?queue={{ category.queue.pk }}&_readonly_fields_=queue&{{ query_param_string }}"
+             class="btn bg-body-tertiary border ms-auto">
+            {% translate "Create Ticket" %}
+            <i class="fa fa-plus ms-2"></i>
+          </a>
+        {% endif %}
+      {% endif %}
+    </div>
+    <p class="lead">{{ category.description|linebreaksbr }}</p>
+  {% endblock header %}
+  <div class="accordion" id="accordionKbItem">
+    {% for item in items %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button
+                         {% if selected_item != item.id %}collapsed{% endif %}"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#collapse-{{ item.id }}"
+                  aria-expanded="{% if selected_item == item.id %}true{% else %}false{% endif %}"
+                  aria-controls="collapse-{{ item.id }}">{{ item.title }}</button>
+        </h2>
+        <div id="collapse-{{ item.id }}"
+             class="accordion-collapse collapse
+                    {% if selected_item == item.id %}show{% endif %}"
+             data-bs-parent="#accordionKbItem">
+          <div class="accordion-body">
+            <h5>{{ item.question }}</h5>
+            <div class="card-answer">{{ item.get_markdown }}</div>
+            <div class="d-flex align-items-center">
+              {# Upvote / Downvote forms #}
+              {% if request.user.pk %}
+                <div class="me-auto">
+                  <form method="post" action="{% url "helpdesk:kb_vote" item.pk "up" %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-outline-success btn-sm">
+                      <i class="fa-regular fa-thumbs-up"></i>
+                    </button>
+                  </form>
+                  <form method="post" action="{% url "helpdesk:kb_vote" item.pk "down" %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-outline-danger btn-sm">
+                      <i class="fa-regular fa-thumbs-down"></i>
+                    </button>
+                  </form>
+                  {% if item.votes != 0 %}
+                    {% blocktranslate with recommendations=item.recommendations votes=item.votes  %}
+                    <span class="text-body-secondary small ms-2">{{ recommendations }} of {{ votes }} people found this answer useful</span>
+                    {% endblocktranslate %}
+                  {% endif %}
+                </div>
+              {% endif %}
+              {% if staff %}
+                <a href="{% url 'helpdesk:list' %}?kbitem={{ item.id }}" class="btn btn-link me-2">
+                  <span class="me-1">{{ item.num_open_tickets }}</span>{% translate "Open tickets" %}
+                  <i class="fa-solid fa-chevron-right ms-1"></i>
+                </a>
+              {% endif %}
+              {% if iframe %}
+                <a href="{% url 'helpdesk:submit_iframe' %}?{% if category.queue %}queue={{ category.queue.pk }}&_readonly_fields_=queue&{% endif %}kbitem={{ item.id }}&{{ query_param_string }}"
+                   class="btn bg-body-tertiary border">
+                  {% translate "Contact a human" %}
+                  <i class="fa fa-envelope ms-1"></i>
+                </a>
+              {% else %}
+                <a href="{% url 'helpdesk:submit' %}?{% if category.queue %}queue={{ category.queue.pk }}&_readonly_fields_=queue&{% endif %}kbitem={{ item.id }}&{{ query_param_string }}"
+                   class="btn bg-body-tertiary border">
+                  {% translate "Create New Ticket" %}
+                  <i class="fa fa-plus ms-1"></i>
+                </a>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</article>
