@@ -279,7 +279,7 @@ def _git(root: Path, records: list[dict]) -> dict:
             mode, digest = staged
             if record.get('_git_blob', {}).get(algorithm) is None:
                 unknown = True
-            elif record['_git_blob'][algorithm] != digest:
+            elif digest not in (record['_git_blob'][algorithm], record.get('_git_blob_lf', {}).get(algorithm)):
                 dirty = True
             if os.name != 'nt' and record.get('_stat') and mode in {'100644', '100755'}:
                 executable = bool(record['_stat'][2] & 0o111)
@@ -346,6 +346,11 @@ def collect(repo: Path, redactor: Callable[[str], str], max_file_bytes: int = 2_
             record['sha256'] = hashlib.sha256(payload).hexdigest()
             blob = f'blob {len(payload)}\0'.encode() + payload
             record['_git_blob'] = {name: hashlib.new(name, blob).hexdigest() for name in ('sha1', 'sha256')}
+            if b'\r\n' in payload:
+                # Windows checkouts (core.autocrlf) keep CRLF on disk while Git stores LF.
+                normalized = payload.replace(b'\r\n', b'\n')
+                lf_blob = f'blob {len(normalized)}\0'.encode() + normalized
+                record['_git_blob_lf'] = {name: hashlib.new(name, lf_blob).hexdigest() for name in ('sha1', 'sha256')}
             if record['decision'] == 'resource':
                 record['status'] = 'resource'
                 continue

@@ -27,7 +27,7 @@ class InventoryTests(unittest.TestCase):
     def write(self, path, text):
         destination = self.root / path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(text, encoding='utf-8')
+        destination.write_text(text, encoding='utf-8', newline='\n')  # identical bytes on Windows
         return destination
 
     def collect(self, **kwargs):

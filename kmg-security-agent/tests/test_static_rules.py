@@ -287,5 +287,22 @@ class PortableReaderTests(unittest.TestCase):
                     readers.read_bytes(root, 'link.py', 1000)
 
 
+class WindowsLineEndingTests(unittest.TestCase):
+    @unittest.skipUnless(__import__('shutil').which('git'), 'git not installed')
+    def test_crlf_checkout_is_not_reported_dirty(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'app.py').write_bytes(b'x = 1\r\ny = 2\r\n')
+            def git(*args):
+                subprocess.run(['git', '-c', 'core.autocrlf=true', '-c', 'core.safecrlf=false', '-c', 'commit.gpgsign=false',
+                                '-c', 'user.name=t', '-c', 'user.email=t@example.test', '-C', str(root), *args],
+                               check=True, capture_output=True)
+            git('init', '-q'); git('add', '.'); git('commit', '-qm', 'crlf')
+            self.assertIs(inventory.collect(root, Redactor())['target']['dirty'], False)
+            (root / 'app.py').write_bytes(b'x = 1\r\ny = 3\r\n')
+            self.assertIs(inventory.collect(root, Redactor())['target']['dirty'], True)
+
+
 if __name__ == '__main__':
     unittest.main()
