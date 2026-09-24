@@ -39,18 +39,22 @@ def load_config(env_file: Path | None = None) -> Config:
                 value = value.split(' #', 1)[0].rstrip()
             values[name] = value
     values.update(os.environ)
-    key = values.get('OPENROUTER_API_KEY', '').strip()
-    model = values.get('OPENROUTER_MODEL', 'qwen/qwen3.8-27b:free').strip()
-    base = values.get('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
+    # LLM_* is the provider-neutral interface (e.g. the organiser's OpenAI-compatible endpoint);
+    # OPENROUTER_* is kept for backward compatibility.
+    def pick(name, default=''):
+        return (values.get('LLM_' + name) or values.get('OPENROUTER_' + name) or default).strip()
+    key = pick('API_KEY')
+    model = pick('MODEL', 'qwen/qwen3.8-27b:free')
+    base = pick('BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
     if not key:
-        raise ConfigError('Не задан OPENROUTER_API_KEY')
+        raise ConfigError('Не задан ключ модели (LLM_API_KEY или OPENROUTER_API_KEY)')
     if not model or any(ch.isspace() for ch in model):
-        raise ConfigError('OPENROUTER_MODEL должен содержать точный ID модели')
+        raise ConfigError('LLM_MODEL должен содержать точный ID модели')
     parsed = urlparse(base)
     if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in {'localhost', '127.0.0.1', '::1'}):
         raise ConfigError('API должен использовать HTTPS либо локальный HTTP')
     if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname:
-        raise ConfigError('Некорректный OPENROUTER_BASE_URL')
+        raise ConfigError('Некорректный LLM_BASE_URL')
     allow_paid = values.get('ALLOW_PAID_MODEL', 'false').lower() == 'true'
     if parsed.hostname == 'openrouter.ai' and not allow_paid and not model.endswith(':free'):
         raise ConfigError('Платная модель запрещена; выберите :free или явно задайте ALLOW_PAID_MODEL=true')

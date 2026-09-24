@@ -197,7 +197,7 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(len(result["requirements"]), 8)
         markdown = (self.output / "report.md").read_text()
         self.assertIn(result["findings"][0]["id"], markdown)
-        self.assertIn("exit code: **1**", markdown)
+        self.assertIn("| Код завершения | **1** |", markdown)
         self.assertIn("ИБ-01", (self.output / "run.log").read_text())
 
     def test_internal_failure_has_report_and_all_eight_statuses(self):
