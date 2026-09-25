@@ -123,3 +123,54 @@ def scan(client, data, progress=lambda _: None):
         for check in checks:
             check['coverage_complete'] = False
     return {'checks': checks, 'errors': list(dict.fromkeys(errors)), 'external_error': external_error, 'coverage': coverage}
+
+
+def _locations(finding):
+    return {(item['path'], line) for item in finding['evidence'] for line in range(item['start_line'], item['end_line'] + 1)}
+
+
+def static_checks(data):
+    """Run deterministic rules and attach the same quote validation as model findings."""
+    from . import static_rules
+    result = static_rules.run(data['documents'])
+    for check in result['checks']:
+        errors = evidence.validate_review(check, data['documents'])
+        if errors:  # a rule produced an unverifiable location: never publish it silently
+            raise AgentError('Статическое правило сформировало непроверяемую цитату: ' + errors[0])
+    for item in result['additional_findings']:
+        wrapper = {'findings': [{'evidence': item['evidence']}]}
+        if evidence.validate_review(wrapper, data['documents']):
+            raise AgentError('Дополнительное наблюдение содержит непроверяемую цитату')
+    return result
+
+
+def combine(static_result, llm_result, llm_error=None):
+    """Union of verified findings per requirement; static coverage keeps the verdict defined."""
+    llm_by = {c['requirement_id']: c for c in (llm_result or {}).get('checks', [])}
+    checks = []
+    for check in static_result['checks']:
+        rid = check['requirement_id']
+        findings = [dict(f, detected_by='static_rule') for f in check['findings']]
+        limitations = list(check['limitations'])
+        rationale = check['rationale']
+        methods = ['static_rules']
+        model = llm_by.get(rid)
+        if model and model.get('status') in ('violated', 'no_violations_found') and model.get('coverage_complete'):
+            methods.append('llm')
+            taken = set().union(*(_locations(f) for f in findings)) if findings else set()
+            for finding in model.get('findings', []):
+                if _locations(finding) & taken:
+                    continue  # same place already reported by a deterministic rule
+                findings.append(dict(finding, detected_by='llm'))
+                taken |= _locations(finding)
+            rationale += ' LLM: ' + model.get('rationale', '')
+            limitations += model.get('limitations', [])
+        else:
+            reason = llm_error or (model or {}).get('rationale') or 'LLM-анализ не выполнялся'
+            limitations.append('LLM-анализ требования не завершён (' + reason + '); вывод основан на детерминированных правилах.')
+        checks.append(dict(check, findings=findings, status='violated' if findings else 'no_violations_found',
+                           rationale=rationale, limitations=limitations, coverage_complete=True,
+                           analysis_methods=methods,
+                           included_paths=(model or {}).get('included_paths', []),
+                           context_selection=(model or {}).get('context_selection', {})))
+    return checks

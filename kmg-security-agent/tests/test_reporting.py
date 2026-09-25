@@ -197,7 +197,7 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(len(result["requirements"]), 8)
         markdown = (self.output / "report.md").read_text()
         self.assertIn(result["findings"][0]["id"], markdown)
-        self.assertIn("exit code: **1**", markdown)
+        self.assertIn("| Код завершения | **1** |", markdown)
         self.assertIn("ИБ-01", (self.output / "run.log").read_text())
 
     def test_internal_failure_has_report_and_all_eight_statuses(self):
@@ -214,7 +214,7 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(result["finding_count"], 1)
         self.assertFalse((self.output / "report.json").exists())
         self.assertFalse((self.output / "report.md").exists())
-        self.assertEqual({path.name for path in self.output.iterdir()}, {"run-status.json", "run-status.md", "manifest.json", "run.log"})
+        self.assertEqual({path.name for path in self.output.iterdir()}, {"run-status.json", "run-status.md", "run-status.html", "manifest.json", "run.log"})
 
     def test_every_written_artifact_and_returned_data_are_redacted(self):
         secret = "DEMO-SECRET-VALUE"

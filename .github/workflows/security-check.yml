@@ -1,28 +1,60 @@
 name: Pavlodar security checks
 
+# Шаг проверки ИБ запускается на каждый push и блокирует следующий шаг (release)
+# при нарушениях. Проверяется весь проект, а не только изменённые файлы.
 on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      target_folder:
+        description: 'Папка проекта в этом репозитории'
+        required: false
+        default: 'KMG-Digital-Hackathon'
+        type: choice
+        options: [KMG-Digital-Hackathon, KMG-Digital-Hackathon-fixed]
+      target_repository:
+        description: 'Проверяемый репозиторий owner/name (пусто — папка KMG-Digital-Hackathon этого репозитория)'
+        required: false
+        default: ''
+      target_ref:
+        description: 'Ветка, тег или commit проверяемого репозитория'
+        required: false
+        default: ''
+      target_path:
+        description: 'Подкаталог проекта внутри проверяемого репозитория'
+        required: false
+        default: ''
+      mode:
+        description: 'hybrid — правила + LLM; static — только правила'
+        required: false
+        default: 'hybrid'
+        type: choice
+        options: [hybrid, static]
 
 permissions:
   contents: read
 
-defaults:
-  run:
-    shell: bash
-    working-directory: kmg-security-agent
-
 env:
-  PYTHONPATH: ${{ github.workspace }}/kmg-security-agent/src
   PYTHONDONTWRITEBYTECODE: '1'
   GIT_OPTIONAL_LOCKS: '0'
+  PYTHONUTF8: '1'
 
 jobs:
   tests:
-    name: Offline agent tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    name: Agent tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: kmg-security-agent
+    env:
+      PYTHONPATH: ${{ github.workspace }}/kmg-security-agent/src
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,97 +62,124 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
-      - run: python -m unittest discover -s tests -v
-
-  configuration:
-    name: Check whether live analysis is configured
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      ready: ${{ steps.key.outputs.ready }}
-    steps:
-      - id: key
-        working-directory: ${{ github.workspace }}
-        env:
-          MODEL_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Smoke scan with deterministic rules
         run: |
-          if [ -n "$MODEL_API_KEY" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo 'Live security analysis is not configured: add OPENROUTER_API_KEY to repository Actions secrets.' >> "$GITHUB_STEP_SUMMARY"
-            echo 'Offline tests can run; no security verdict or release permission is produced.' >> "$GITHUB_STEP_SUMMARY"
-          fi
+          set +e
+          python -m kmg_security_agent scan --mode static \
+            --repo "$GITHUB_WORKSPACE/KMG-Digital-Hackathon" --output "$RUNNER_TEMP/smoke"
+          code=$?
+          echo "smoke exit code: $code"
+          # 0 или 1 — проверка выполнена; 2 — агент не смог выполнить проверку
+          [ "$code" -ne 2 ]
 
   security-check:
-    name: Review KMG source with Qwen
-    needs: [tests, configuration]
-    if: needs.configuration.outputs.ready == 'true'
+    name: ИБ-проверка (шаг CI/CD)
+    needs: tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
       exit_code: ${{ steps.scan.outputs.exit_code }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}/kmg-security-agent/src
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Checkout external target (optional)
+        if: github.event_name == 'workflow_dispatch' && inputs.target_repository != ''
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.target_repository }}
+          ref: ${{ inputs.target_ref }}
+          path: external-target
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
-      - name: Make target sources read-only
-        run: chmod -R a-w "$GITHUB_WORKSPACE/KMG-Digital-Hackathon"
-      - name: Analyze the target from this exact commit
+      - name: Resolve target
+        id: target
+        env:
+          TARGET_PATH: ${{ inputs.target_path }}
+          TARGET_FOLDER: ${{ inputs.target_folder }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          case "$TARGET_PATH" in *..*) echo "::error::target_path must not contain .."; exit 2;; esac
+          if [ -d external-target ]; then
+            dir="$GITHUB_WORKSPACE/external-target/$TARGET_PATH"
+          elif [ "$TARGET_FOLDER" = "KMG-Digital-Hackathon-fixed" ] || { [ -z "$TARGET_FOLDER" ] && [[ "$BRANCH" == demo/fixed* ]]; }; then
+            # Демонстрация: исправленная командой копия проекта должна пройти проверку (код 0)
+            dir="$GITHUB_WORKSPACE/KMG-Digital-Hackathon-fixed"
+          else
+            dir="$GITHUB_WORKSPACE/KMG-Digital-Hackathon"
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "Проверяемый каталог: $dir"
+          chmod -R a-w "$dir"
+      - name: Security scan (ИБ-01…ИБ-08)
         id: scan
         timeout-minutes: 28
+        working-directory: kmg-security-agent
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'qwen/qwen3.8-27b:free' }}
-          OPENROUTER_BASE_URL: ${{ vars.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1' }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.OPENROUTER_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || vars.OPENROUTER_MODEL || 'qwen/qwen3.8-27b:free' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || vars.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1' }}
+          SCAN_MODE: ${{ inputs.mode || 'hybrid' }}
+          TARGET_DIR: ${{ steps.target.outputs.dir }}
         run: |
           set +e
-          python -m kmg_security_agent scan \
-            --repo "$GITHUB_WORKSPACE/KMG-Digital-Hackathon" \
+          python -m kmg_security_agent scan --mode "$SCAN_MODE" \
+            --repo "$TARGET_DIR" \
             --output "$GITHUB_WORKSPACE/reports/security" \
             --timeout 1560 --request-timeout 180 --max-requests 25
           result=$?
           echo "exit_code=$result" >> "$GITHUB_OUTPUT"
+          report=$(ls -d "$GITHUB_WORKSPACE"/reports/security/*/ 2>/dev/null | tail -1)
+          if [ -n "$report" ] && [ -f "$report/report.md" ]; then
+            sed -n '1,/^## Нарушения требований ИБ/p' "$report/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          case $result in
+            0) echo "::notice::Нарушений требований ИБ не выявлено";;
+            1) echo "::error::Выявлены нарушения требований ИБ — слияние и развёртывание блокируются";;
+            *) echo "::error::Проверка ИБ не выполнена (код $result)";;
+          esac
           exit "$result"
-      - name: Preserve CI status on failures
+      - name: Preserve CI status
         if: always()
-        working-directory: ${{ github.workspace }}
         env:
           SCAN_OUTCOME: ${{ steps.scan.outcome }}
           SCAN_EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
           CHECKED_COMMIT: ${{ github.sha }}
         run: |
+          mkdir -p reports
           python - <<'PY'
           import json, os
           from pathlib import Path
-          folder = Path('reports')
-          folder.mkdir(exist_ok=True)
           data = {'kind': 'ci_diagnostics', 'commit': os.environ['CHECKED_COMMIT'],
                   'scan_outcome': os.environ.get('SCAN_OUTCOME'),
                   'scan_exit_code': os.environ.get('SCAN_EXIT_CODE') or None}
-          (folder / 'ci-status.json').write_text(json.dumps(data, indent=2) + '\n')
+          Path('reports/ci-status.json').write_text(json.dumps(data, indent=2) + '\n')
           PY
-      - name: Upload reports and diagnostics
+      - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: security-${{ github.run_id }}-${{ github.run_attempt }}
+          name: security-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: reports/
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 30
       - name: Restore permissions for checkout cleanup
         if: always()
-        run: chmod -R u+w "$GITHUB_WORKSPACE/KMG-Digital-Hackathon"
+        env:
+          TARGET_DIR: ${{ steps.target.outputs.dir }}
+        run: chmod -R u+w "$TARGET_DIR" || true
 
   release-check:
-    name: Demo release permission
+    name: Deploy gate
     needs: security-check
     if: needs.security-check.result == 'success' && needs.security-check.outputs.exit_code == '0'
     runs-on: ubuntu-latest
     steps:
-      - working-directory: ${{ github.workspace }}
-        run: echo 'All mandatory security checks passed; the next step is permitted. This demo does not deploy a service.'
+      - run: echo 'Все обязательные проверки ИБ пройдены; развёртывание разрешено (демонстрационный шаг).'

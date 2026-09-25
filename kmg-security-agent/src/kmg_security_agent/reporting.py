@@ -122,6 +122,7 @@ def _normalize_checks(checks: list[dict], errors: list[str]) -> list[dict]:
             "included_paths": deepcopy(check.get("included_paths", [])),
             "context_selection": deepcopy(check.get("context_selection", {})),
             "semantic_validation": check.get("semantic_validation", "Not provided"),
+            "analysis_methods": list(check.get("analysis_methods", ["llm"])),
         })
     return result
 
@@ -143,45 +144,94 @@ def _code_block(text: str) -> str:
     return f"{fence}\n{text}\n{fence}"
 
 
+STATUS_RU = {'violated': 'нарушено', 'no_violations_found': 'нарушений не выявлено',
+             'inconclusive': 'не установлено', 'error': 'ошибка проверки'}
+RESULT_RU = {'violations_found': 'выявлены нарушения — пайплайн блокируется',
+             'no_violations_found': 'нарушений не выявлено — пайплайн продолжается',
+             'incomplete': 'проверка не завершена'}
+SEVERITY_RU = {'critical': 'критическая', 'high': 'высокая', 'medium': 'средняя', 'low': 'низкая'}
+METHOD_RU = {'static_rule': 'детерминированное правило', 'llm': 'LLM-анализ'}
+
+
+def _evidence_md(evidence: dict) -> list:
+    start, end = evidence['start_line'], evidence['end_line']
+    single = start == end
+    if evidence.get('location_kind') == 'extracted_document_lines':
+        unit = 'абзац извлечённого текста' if single else 'абзацы извлечённого текста'
+    else:
+        unit = 'строка' if single else 'строки'
+    where = f"{start}" if single else f"{start}–{end}"
+    return [f"`{_md_cell(evidence['path'])}`, {unit} {where}:", "", _code_block(evidence["quote"]), ""]
+
+
 def _markdown(report: dict) -> str:
     diagnostic = report["report_type"] == "run_diagnostics"
-    title = "KMG Security Agent — incomplete run diagnostics" if diagnostic else "KMG Security Agent — analysis report"
-    lines = [f"# {title}", "", f"Result: **{report['result']}**; exit code: **{report['exit_code']}**.", ""]
+    timing = report["timing"]
+    lines = ["# Отчёт проверки требований ИБ" + (" — диагностика незавершённого запуска" if diagnostic else ""), ""]
     if diagnostic:
-        lines += ["External service failure prevented completion. This is not a completed compliance report.", ""]
+        lines += ["Сбой внешнего сервиса не позволил завершить проверку. Это не заключение о соответствии.", ""]
     lines += [
-        f"Target commit: `{_md_cell(report['target'].get('commit'))}`.",
-        f"Model: {_md_text(report['model'])}. Duration: {_md_text(report['timing'].get('duration_seconds'))} seconds.",
-        f"Verified findings: {report['finding_count']}.", "",
-        "## Requirements", "", "| Requirement | Status | Coverage complete |", "|---|---|---|",
+        "## Сводка", "",
+        "| Параметр | Значение |", "|---|---|",
+        f"| Коммит | `{_md_cell(report['target'].get('commit'))}` |",
+        f"| Начало | {_md_cell(timing.get('started_at'))} |",
+        f"| Завершение | {_md_cell(timing.get('finished_at'))} |",
+        f"| Длительность, с | {_md_cell(timing.get('duration_seconds'))} |",
+        f"| Режим анализа | {_md_cell(report['metadata'].get('mode', 'llm'))} |",
+        f"| Модель | {_md_cell(report['model'] or 'не использовалась')} |",
+        f"| **Общий результат** | **{_md_cell(RESULT_RU.get(report['result'], report['result']))}** |",
+        f"| Код завершения | **{report['exit_code']}** |",
+        f"| Нарушений ИБ | **{report['finding_count']}** |",
+        f"| Нарушенные требования | {_md_cell(', '.join(report['violated_requirement_ids']) or 'нет')} |",
+        f"| Дополнительные замечания (не блокируют) | {len(report.get('additional_findings', []))} |",
+        "", "## Статус по требованиям", "",
+        "| Требование | Наименование | Статус | Находок | Методы |", "|---|---|---|---|---|",
     ]
     for check in report["requirements"]:
-        lines.append(f"| {_md_cell(check['requirement_id'])} | {_md_cell(check['status'])} | {check['coverage_complete']} |")
-    for check in report["requirements"]:
-        lines += ["", f"### {check['requirement_id']}: {_md_text(check['title'])}", "", _md_text(check["rationale"])]
-        for limitation in check["limitations"]:
-            lines += ["", f"Limitation: {_md_text(limitation)}"]
-    lines += ["", "## Verified findings", ""]
+        count = sum(1 for f in report['findings'] if f['requirement_id'] == check['requirement_id'])
+        methods = ', '.join(check.get('analysis_methods', [])) or '—'
+        lines.append(f"| {check['requirement_id']} | {_md_cell(check['title'])} | {_md_cell(STATUS_RU.get(check['status'], check['status']))} | {count} | {_md_cell(methods)} |")
+    lines += ["", "## Нарушения требований ИБ", ""]
     if not report["findings"]:
-        lines.append("No verified findings are available. Incomplete checks are not evidence of compliance.")
-    for finding in report["findings"]:
+        lines.append("Подтверждённых нарушений нет." if report['exit_code'] == 0 else
+                     "Подтверждённых нарушений нет; незавершённая проверка не является доказательством соответствия.")
+    for number, finding in enumerate(report["findings"], 1):
+        definition = next((c for c in report['requirements'] if c['requirement_id'] == finding['requirement_id']), {})
         lines += [
-            f"### {finding['id']} — {_md_text(finding['title'])}", "",
-            f"Requirement: {finding['requirement_id']}. Severity: {finding['severity']}.", "",
-            _md_text(finding["explanation"]), "",
-            f"Recommendation: {_md_text(finding['recommendation'])}", "",
+            f"### {number}. [{finding['requirement_id']}] {_md_text(finding['title'])}", "",
+            f"- **Требование:** {finding['requirement_id']} — {_md_text(definition.get('title', ''))}",
+            f"- **Критичность:** {SEVERITY_RU.get(finding['severity'], finding['severity'])}",
+            f"- **Метод выявления:** {METHOD_RU.get(finding.get('detected_by'), 'LLM-анализ')}",
+            f"- **Идентификатор:** `{finding['id']}`", "",
+            f"**Обоснование.** {_md_text(finding['explanation'])}", "",
+            f"**Рекомендация.** {_md_text(finding['recommendation'])}", "",
+            "**Доказательства:**", "",
         ]
         for evidence in finding["evidence"]:
-            unit = "extracted document text lines (not page coordinates)" if evidence.get("location_kind") == "extracted_document_lines" else "source lines"
-            lines += [f"{_md_text(evidence['path'])}, {unit} {evidence['start_line']}–{evidence['end_line']}:", "", _code_block(evidence["quote"]), ""]
-        lines += ["Evidence verification checks source locations and quotations; it is not a formal proof of the semantic conclusion.", ""]
-    for key, heading in (("additional_observations", "Additional observations (non-blocking)"), ("errors", "Errors"), ("limitations", "Limitations")):
-        if report[key]:
+            lines += _evidence_md(evidence)
+    lines += ["## Прочие дефекты (несоответствия технической спецификации, не блокируют пайплайн)", ""]
+    extra = report.get('additional_findings', [])
+    if not extra:
+        lines += ["Не выявлено.", ""]
+    for number, item in enumerate(extra, 1):
+        lines += [f"### Д{number}. {_md_text(item['title'])}", "",
+                  f"- **Пункт спецификации:** {_md_text(item.get('spec_reference', '—'))}",
+                  f"- **Критичность:** {SEVERITY_RU.get(item.get('severity'), item.get('severity'))}", "",
+                  _md_text(item['explanation']), "", f"**Рекомендация.** {_md_text(item['recommendation'])}", ""]
+        for evidence in item['evidence']:
+            lines += _evidence_md(evidence)
+    for key, heading in (("additional_observations", "Прочие наблюдения"), ("errors", "Ошибки"), ("limitations", "Ограничения проверки")):
+        if report.get(key):
             lines += [f"## {heading}", ""]
             for item in report[key]:
                 lines.append(f"- {_md_text(item)}")
             lines.append("")
-    lines += ["## Resources and coverage", "", _code_block(json.dumps(report["usage"], ensure_ascii=False, indent=2)), "", "See manifest.json for file/chunk coverage and exclusions.", ""]
+    lines += ["## Обоснование по требованиям", ""]
+    for check in report["requirements"]:
+        lines += [f"**{check['requirement_id']}.** {_md_text(check['rationale'])}", ""]
+    lines += ["## Ресурсы и покрытие", "", _code_block(json.dumps({'usage': report['usage'], 'coverage': report['metadata'].get('coverage')},
+                                                                 ensure_ascii=False, indent=2)), "",
+              "Полный перечень файлов и причин исключения — в manifest.json.", ""]
     return "\n".join(lines)
 
 
@@ -228,6 +278,7 @@ def write_results(
         "finding_count": len(findings),
         "violated_requirement_ids": sorted({finding["requirement_id"] for finding in findings}),
         "additional_observations": metadata.get("additional_observations", []),
+        "additional_findings": deepcopy(metadata.get("additional_findings", [])),
         "errors": list(dict.fromkeys(errors)),
         "limitations": list(limitations),
         "usage": deepcopy(usage),
@@ -240,6 +291,8 @@ def write_results(
     base = "run-status" if external_error else "report"
     _write(output / f"{base}.json", json.dumps(safe_report, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     _write(output / f"{base}.md", redactor(_markdown(safe_report)))
+    from .html_report import render
+    _write(output / f"{base}.html", redactor(render(safe_report)))
     _write(output / "manifest.json", json.dumps(safe_manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     log = [
         f"result={safe_report['result']} exit_code={code}",

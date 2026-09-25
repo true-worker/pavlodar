@@ -1,0 +1,185 @@
+"""
+django-helpdesk - A Django powered ticket tracker for small enterprise.
+
+(c) Copyright 2008 Jutda. All Rights Reserved. See LICENSE for details.
+
+views/feeds.py - A handful of staff-only RSS feeds to provide ticket details
+                 to feed readers or similar software.
+"""
+
+from django.contrib.auth import get_user_model
+from django.contrib.syndication.views import Feed
+from django.core.exceptions import PermissionDenied
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
+from django.utils.translation import gettext as _
+
+from helpdesk.models import FollowUp, Queue, Ticket
+from helpdesk.user import HelpdeskUser
+
+User = get_user_model()
+
+
+Q_OPEN_STATUSES = Q()
+for open_status in Ticket.OPEN_STATUSES:
+    Q_OPEN_STATUSES |= Q(status=open_status)
+
+
+class OpenTicketsByUser(Feed):
+    title_template = "helpdesk/rss/ticket_title.html"
+    description_template = "helpdesk/rss/ticket_description.html"
+
+    def get_object(self, request, user_name, queue_slug=None):
+        user = get_object_or_404(User, username=user_name)
+        huser = HelpdeskUser(request.user)
+        if queue_slug:
+            queue = get_object_or_404(Queue, slug=queue_slug)
+            if not huser.can_access_queue(queue):
+                raise PermissionDenied()
+        else:
+            queue = None
+
+        return {
+            "user": user,
+            "queue": queue,
+            "accessible": huser.accessible_tickets(),
+        }
+
+    def title(self, obj):
+        if obj["queue"]:
+            return _("Helpdesk: Open Tickets in queue %(queue)s for %(username)s") % {
+                "queue": obj["queue"].title,
+                "username": obj["user"].get_username(),
+            }
+        else:
+            return _("Helpdesk: Open Tickets for %(username)s") % {
+                "username": obj["user"].get_username(),
+            }
+
+    def description(self, obj):
+        if obj["queue"]:
+            return _(
+                "Open and Reopened Tickets in queue %(queue)s for %(username)s"
+            ) % {
+                "queue": obj["queue"].title,
+                "username": obj["user"].get_username(),
+            }
+        else:
+            return _("Open and Reopened Tickets for %(username)s") % {
+                "username": obj["user"].get_username(),
+            }
+
+    def link(self, obj):
+        if obj["queue"]:
+            return "{}?assigned_to={}&queue={}".format(
+                reverse("helpdesk:list"),
+                obj["user"].id,
+                obj["queue"].id,
+            )
+        else:
+            return "{}?assigned_to={}".format(
+                reverse("helpdesk:list"),
+                obj["user"].id,
+            )
+
+    def items(self, obj):
+        # Scoped to the caller, not to obj["user"]: the feed can be requested
+        # for any username, so filtering only by assignee served another
+        # person's tickets from every queue.
+        tickets = obj["accessible"].filter(assigned_to=obj["user"])
+        if obj["queue"]:
+            tickets = tickets.filter(queue=obj["queue"])
+        return tickets.filter(Q_OPEN_STATUSES)
+
+    def item_pubdate(self, item):
+        return item.created
+
+    def item_author_name(self, item):
+        if item.assigned_to:
+            return item.assigned_to.get_username()
+        else:
+            return _("Unassigned")
+
+
+class UnassignedTickets(Feed):
+    title_template = "helpdesk/rss/ticket_title.html"
+    description_template = "helpdesk/rss/ticket_description.html"
+
+    title = _("Helpdesk: Unassigned Tickets")
+    description = _("Unassigned Open and Reopened tickets")
+    link = ""  # '%s?assigned_to=' % reverse('helpdesk:list')
+
+    def get_object(self, request):
+        return HelpdeskUser(request.user).accessible_tickets()
+
+    def items(self, obj):
+        return obj.filter(assigned_to__isnull=True).filter(Q_OPEN_STATUSES)
+
+    def item_pubdate(self, item):
+        return item.created
+
+    def item_author_name(self, item):
+        if item.assigned_to:
+            return item.assigned_to.get_username()
+        else:
+            return _("Unassigned")
+
+
+class RecentFollowUps(Feed):
+    title_template = "helpdesk/rss/recent_activity_title.html"
+    description_template = "helpdesk/rss/recent_activity_description.html"
+
+    title = _("Helpdesk: Recent Followups")
+    description = _(
+        "Recent FollowUps, such as e-mail replies, comments, attachments and resolutions"
+    )
+    link = "/tickets/"  # reverse('helpdesk:list')
+
+    def get_object(self, request):
+        return HelpdeskUser(request.user).accessible_tickets()
+
+    def items(self, obj):
+        # Narrowed before the slice, not after, or the twenty most recent
+        # follow-ups would be selected across every queue and then filtered
+        # down to whatever happened to be reachable.
+        return FollowUp.objects.filter(ticket__in=obj).order_by("-date")[:20]
+
+
+class OpenTicketsByQueue(Feed):
+    title_template = "helpdesk/rss/ticket_title.html"
+    description_template = "helpdesk/rss/ticket_description.html"
+
+    def get_object(self, request, queue_slug):
+        queue = get_object_or_404(Queue, slug=queue_slug)
+        if not HelpdeskUser(request.user).can_access_queue(queue):
+            raise PermissionDenied()
+        return queue
+
+    def title(self, obj):
+        return _("Helpdesk: Open Tickets in queue %(queue)s") % {
+            "queue": obj.title,
+        }
+
+    def description(self, obj):
+        return _("Open and Reopened Tickets in queue %(queue)s") % {
+            "queue": obj.title,
+        }
+
+    def link(self, obj):
+        return "{}?queue={}".format(
+            reverse("helpdesk:list"),
+            obj.id,
+        )
+
+    def items(self, obj):
+        return Ticket.objects.filter(queue=obj).filter(Q_OPEN_STATUSES)
+
+    def item_pubdate(self, item):
+        return item.created
+
+    def item_author_name(self, item):
+        if item.assigned_to:
+            return item.assigned_to.get_username()
+        else:
+            return _("Unassigned")
