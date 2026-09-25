@@ -374,6 +374,64 @@ def _urlconf_modules(project: Project, root_urlconf):
     return seen
 
 
+USER_MODEL_NAMES = {'User', 'UserModel', 'Person', 'Account'}
+LISTING = {'all', 'values', 'values_list', 'filter', 'iterator', 'only', 'order_by'}
+DATA_RESPONSES = {'JsonResponse', 'FileResponse', 'StreamingHttpResponse'}
+
+
+def _lists_users(project: Project, path, fn, depth=0) -> bool:
+    """True when fn (or a project helper it calls) reads the user directory in bulk."""
+    mutated = {id(n.func.value) for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr in ('update', 'delete', 'exists', 'count', 'first', 'get')}
+    for node in ast.walk(fn):
+        if id(node) in mutated:
+            continue  # filter(...).update()/.exists()/.get() is not a directory read
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in LISTING:
+            base = node.func.value
+            if isinstance(base, ast.Attribute) and base.attr == 'objects':
+                owner = base.value
+                if (_last(owner) in USER_MODEL_NAMES) or (isinstance(owner, ast.Call) and _last(owner.func) == 'get_user_model'):
+                    return True
+        if isinstance(node, ast.Call) and depth < 2:
+            target = project.resolve(path, node.func)
+            if target and isinstance(target[1], FUNCS) and target[1] is not fn and _lists_users(project, target[0], target[1], depth + 1):
+                return True
+    return False
+
+
+def _returns_data(fn) -> bool:
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call) and _last(node.func) in DATA_RESPONSES:
+            return True
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and 'attachment' in node.value and 'filename' in node.value:
+            return True
+    return False
+
+
+def _int_value(project: Project, path, node):
+    """Evaluate an int literal, simple arithmetic, or a module-level constant; None if unknown."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mult, ast.Add)):
+        left, right = _int_value(project, path, node.left), _int_value(project, path, node.right)
+        if left is not None and right is not None:
+            return left * right if isinstance(node.op, ast.Mult) else left + right
+    if isinstance(node, ast.Name):
+        for stmt in project.trees.get(path, ast.Module(body=[])).body:
+            if isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == node.id for t in stmt.targets):
+                return _int_value(project, path, stmt.value)
+    if isinstance(node, ast.Call) and _last(node.func) == 'timedelta':
+        units = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 86400}
+        total = 0
+        for kw in node.keywords:
+            value = _int_value(project, path, kw.value)
+            if kw.arg not in units or value is None:
+                return None
+            total += value * units[kw.arg]
+        return total
+    return None
+
+
 def _routes(project: Project, url_modules):
     routes = []
     for path in url_modules:
@@ -404,14 +462,28 @@ def _plain_field(project: Project, path: str, func) -> bool:
     origin = project.imports.get(path, {}).get(_dotted(func).split('.')[0])
     if origin and origin[1] and '.' not in _dotted(func):
         name = origin[1]
-    if re.search(r'encrypt|cipher|secure', name, re.I):
-        return False
     target = project.resolve(path, func)
     if target and isinstance(target[1], ast.ClassDef):
-        body = ast.dump(target[1])
-        if re.search(r'encrypt|AESGCM|Fernet|ChaCha20', body, re.I):
-            return False
-        return any(_last(b) in PLAIN_FIELD_TYPES for b in target[1].bases)
+        # A field counts as encrypted only if it (or a project mixin/base) really calls an encryption primitive
+        # when storing the value; a name like "EncryptedCharField" alone is not evidence.
+        seen, stack, encrypts, plain_base = set(), [target], False, False
+        while stack:
+            cpath, cls = stack.pop()
+            if id(cls) in seen:
+                continue
+            seen.add(id(cls))
+            for node in ast.walk(cls):
+                if isinstance(node, ast.Call) and re.fullmatch(r'encrypt\w*|seal', _last(node.func), re.I):
+                    encrypts = True
+            for base in cls.bases:
+                if _last(base) in PLAIN_FIELD_TYPES:
+                    plain_base = True
+                resolved = project.resolve(cpath, base)
+                if resolved and isinstance(resolved[1], ast.ClassDef):
+                    stack.append(resolved)
+        return plain_base and not encrypts
+    if re.search(r'encrypt|cipher', name, re.I):
+        return False  # third-party encrypted field library (not in the project): trusted by name
     return name in PLAIN_FIELD_TYPES
 
 
@@ -481,10 +553,12 @@ def run(documents: dict) -> dict:
         if global_login and not exempt:
             facts.add('auth')
         name = fn.name if fn is not None else r['view_name']
+        is_admin = bool(ADMIN_ROUTE.search(r['route'])) or bool(ADMIN_VIEW.search(name))
         views.append(dict(r, facts=facts, guard_lines=lines, fn=fn, fn_path=fn_path, name=name,
                           public=bool(PUBLIC_ROUTE.search(r['route'])) or r['view_name'] in PUBLIC_VIEWS,
                           admin=bool(ADMIN_ROUTE.search(r['route'])) or bool(ADMIN_VIEW.search(name)),
-                          export=bool(EXPORT_ROUTE.search(r['route'])) or name.startswith('export')))
+                          export=bool(EXPORT_ROUTE.search(r['route'])) or name.startswith('export')
+                          or (not is_admin and fn is not None and _returns_data(fn) and _lists_users(project, fn_path, fn))))
 
     # ---- ИБ-01 / ИБ-02 / ИБ-08 per route ----------------------------------------------------------
     admin_groups = {}
@@ -511,8 +585,9 @@ def run(documents: dict) -> dict:
             if 'admin_role' not in facts:
                 problems.append('роль «администратор» не проверяется на сервере'
                                 + (' (проверяется только признак is_staff)' if 'staff' in facts else ''))
-            if not hits and not global_audit:
-                problems.append('факт выгрузки не записывается в журнал аудита')
+            if not hits:
+                # A generic request log does not record format and number of exported records (ТЗ 4.7.3).
+                problems.append('факт выгрузки не записывается в журнал аудита (формат, число записей)')
             if problems:
                 out.add('ИБ-08', f'Выгрузка «{route}» ({name}): ' + '; '.join(problems),
                         'critical' if 'admin_role' not in facts else 'high',
@@ -559,6 +634,12 @@ def run(documents: dict) -> dict:
             kws = {k.arg: k.value for k in node.keywords}
             origin = project.imports.get(path, {}).get(dotted.split('.')[0], ('', None))
             is_signing = dotted.endswith('signing.loads') or (dotted == 'loads' and origin[0] == 'django.core.signing')
+            ttl = _int_value(project, path, kws['max_age']) if is_signing and 'max_age' in kws else None
+            if is_signing and 'max_age' in kws and (ttl is not None and ttl > 900 or (isinstance(kws['max_age'], ast.Constant) and kws['max_age'].value is None)):
+                out.add('ИБ-02', 'Срок действия токена доступа превышает 15 минут', 'medium',
+                        f'{dotted}() принимает токены возрастом до {ttl if ttl is not None else "∞"} с; техническая спецификация (п. 4.4.7) '
+                        'ограничивает срок действия токена 15 минутами.', 'Установить max_age не более 900 секунд.',
+                        [out.ev(path, node.lineno)])
             if is_signing and 'max_age' not in kws:
                 out.add('ИБ-02', 'Токен доступа проверяется без ограничения срока действия', 'high',
                         f'{dotted}() вызывается без max_age: сервер проверяет только подпись, но не срок действия. '
@@ -577,6 +658,50 @@ def run(documents: dict) -> dict:
                     out.add('ИБ-02', 'JWT проверяется с отключённой проверкой подписи или срока', 'high',
                             'jwt.decode вызывается с отключённой проверкой подписи или срока действия.',
                             'Включить проверку подписи и срока действия токена.', [out.ev(path, node.lineno)])
+
+    # ---- ИБ-02: session settings -----------------------------------------------------------------
+    path, node = setting('SESSION_COOKIE_AGE')
+    age = _int_value(project, path, node.value) if node is not None else None
+    if age is not None and age > 3600:
+        out.add('ИБ-02', 'Срок жизни сессии больше 60 минут', 'medium',
+                f'SESSION_COOKIE_AGE = {age} с: сессия остаётся действительной дольше установленных 60 минут (п. 4.4.2 спецификации), '
+                'сервер принимает устаревшую сессию.', 'Установить SESSION_COOKIE_AGE не более 3600.', [out.ev(path, node.lineno)])
+    path, node, value = const_setting('SESSION_COOKIE_HTTPONLY')
+    if value is False:
+        out.add('ИБ-02', 'Идентификатор сессии доступен сценариям браузера', 'medium',
+                'SESSION_COOKIE_HTTPONLY = False: cookie сессии читается из JavaScript, и при XSS идентификатор сессии может быть похищен.',
+                'Установить SESSION_COOKIE_HTTPONLY = True.', [out.ev(path, node.lineno)])
+
+    # ---- ИБ-04: plaintext password assignment ------------------------------------------------------
+    for path, tree in project.trees.items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == 'password' for t in node.targets):
+                if not (isinstance(node.value, ast.Call) and _last(node.value.func) in ('make_password', 'encode', 'hash', 'hashpw')) \
+                        and not (isinstance(node.value, ast.Constant) and node.value.value in ('', None)):
+                    out.add('ИБ-04', 'Пароль сохраняется без хеширования', 'critical',
+                            'Атрибуту password присваивается значение напрямую, без set_password()/make_password(): пароль попадает в БД '
+                            'в открытом виде.', 'Использовать user.set_password(...) (argon2/bcrypt/scrypt).', [out.ev(path, node.lineno)])
+            if isinstance(node, ast.Call) and _last(node.func) in ('create', 'update', 'update_or_create', 'get_or_create') \
+                    and any(kw.arg == 'password' for kw in node.keywords) and 'objects' in _dotted(node.func):
+                out.add('ИБ-04', 'Пароль сохраняется без хеширования', 'critical',
+                        f'{_dotted(node.func)}(password=...) записывает пароль в БД как есть, минуя хеширование.',
+                        'Использовать create_user() или set_password().', [out.ev(path, node.lineno)])
+
+    # ---- ИБ-05: journal records written without encryption ------------------------------------------
+    for path, tree in project.trees.items():
+        if not AUDIT_NAME.search(path):
+            continue
+        for fn in (n for n in ast.walk(tree) if isinstance(n, FUNCS)):
+            writes = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                      and (n.func.attr in ('write_bytes', 'write_text', 'write', 'writelines')
+                           or (n.func.attr == 'dump' and len(n.args) >= 2))]
+            encrypts = any(isinstance(n, ast.Call) and re.search(r'encrypt|seal|sign', _last(n.func), re.I) for n in ast.walk(fn))
+            if writes and not encrypts:
+                out.add('ИБ-05', 'Записи журнала сохраняются без шифрования', 'high',
+                        f'Функция {fn.name} в {path} записывает событие журнала на диск без шифрования и кода целостности: '
+                        'локальный пользователь может прочитать и изменить записи до отправки сборщику.',
+                        'Шифровать каждую запись аутентифицированным шифрованием (AES-GCM) ключом, недоступным пользователям.',
+                        [out.ev(path, writes[0].lineno)])
 
     # ---- ИБ-03: transport protection --------------------------------------------------------------
     redirect_false, redirect_true, cookie_ev = [], False, []
@@ -779,11 +904,13 @@ def run(documents: dict) -> dict:
     unaudited, bulk = [], []
     for v in views:
         fn, fn_path = v['fn'], v['fn_path']
-        if fn is None or v['public'] or global_audit:
+        if fn is None or v['public']:
             continue
         hits = audit_calls(project, fn_path, fn)
-        if not hits:
+        if not hits and not global_audit:
             unaudited.append((fn_path, fn))
+        if not hits:
+            # The request log does not list the objects a bulk change actually touched (spec 4.6.4).
             for node in ast.walk(fn):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                         and (node.func.attr in ('bulk_update', 'bulk_create') or (node.func.attr == 'update' and node.keywords and not node.args)):
@@ -804,7 +931,7 @@ def run(documents: dict) -> dict:
                 'Добавить общий компонент аудита (middleware или декоратор для всех маршрутов), фиксирующий пользователя, операцию, '
                 'объект, результат, идентификатор запроса и источника для каждого обращения к данным.',
                 [out.ev(p, fn.lineno) for p, fn in unaudited])
-    db_log = any(re.search(r'connection_created|set_trace_callback|execute_wrapper', d['text'])
+    db_log = any(re.search(r'connection_created\.connect\(|receiver\(\s*connection_created|set_trace_callback\(|execute_wrapper\(', d['text'])
                  for d in documents.values() if d.get('kind') != 'docx')
     path, node = setting('LOGGING')
     if node is not None:

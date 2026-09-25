@@ -135,6 +135,7 @@ def catalog(request):
 @login_required
 def bulk(request):
     User.objects.filter(pk__in=[1]).update(is_active=False)
+    {"audit.record('bulk', 'users', ids=[1])" if safe else "pass"}
     return JsonResponse({{}})
 
 def ticket_api(request):
