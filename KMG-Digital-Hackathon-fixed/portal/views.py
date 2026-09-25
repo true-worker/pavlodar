@@ -162,7 +162,7 @@ def export_csv(request):
     response['Cache-Control'] = 'no-store'
     return response
 
-@access.admin_required
+@login_required
 @require_GET
 def export_json(request):
     rows = people_rows()
