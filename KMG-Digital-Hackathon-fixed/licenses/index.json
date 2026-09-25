@@ -1,0 +1,242 @@
+[
+  {
+    "name": "argon2-cffi",
+    "version": "25.1.0",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/argon2-cffi/LICENSE"
+    ]
+  },
+  {
+    "name": "argon2-cffi-bindings",
+    "version": "26.1.0",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/argon2-cffi-bindings/LICENSE"
+    ]
+  },
+  {
+    "name": "asgiref",
+    "version": "3.12.1",
+    "license_expression": "BSD-3-Clause",
+    "files": [
+      "licenses/asgiref/LICENSE"
+    ]
+  },
+  {
+    "name": "beautifulsoup4",
+    "version": "4.15.0",
+    "license_expression": "MIT License",
+    "files": [
+      "licenses/beautifulsoup4/AUTHORS",
+      "licenses/beautifulsoup4/LICENSE"
+    ]
+  },
+  {
+    "name": "certifi",
+    "version": "2026.7.22",
+    "license_expression": "MPL-2.0",
+    "files": [
+      "licenses/certifi/LICENSE"
+    ]
+  },
+  {
+    "name": "cffi",
+    "version": "2.1.1",
+    "license_expression": "MIT-0",
+    "files": [
+      "licenses/cffi/LICENSE"
+    ]
+  },
+  {
+    "name": "charset-normalizer",
+    "version": "3.5.1",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/charset-normalizer/LICENSE"
+    ]
+  },
+  {
+    "name": "cryptography",
+    "version": "50.0.1",
+    "license_expression": "Apache-2.0 OR BSD-3-Clause",
+    "files": [
+      "licenses/cryptography/LICENSE",
+      "licenses/cryptography/LICENSE.APACHE",
+      "licenses/cryptography/LICENSE.BSD"
+    ]
+  },
+  {
+    "name": "django",
+    "version": "5.2.17",
+    "license_expression": "BSD-3-Clause",
+    "files": [
+      "licenses/django/AUTHORS",
+      "licenses/django/LICENSE",
+      "licenses/django/LICENSE.python"
+    ]
+  },
+  {
+    "name": "django-cleanup",
+    "version": "9.0.0",
+    "license_expression": null,
+    "files": [
+      "licenses/django-cleanup/LICENSE"
+    ]
+  },
+  {
+    "name": "django-model-utils",
+    "version": "5.0.0",
+    "license_expression": "BSD",
+    "files": [
+      "licenses/django-model-utils/AUTHORS.rst",
+      "licenses/django-model-utils/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "djangorestframework",
+    "version": "3.18.1",
+    "license_expression": "BSD-3-Clause",
+    "files": [
+      "licenses/djangorestframework/LICENSE.md"
+    ]
+  },
+  {
+    "name": "email-reply-parser",
+    "version": "0.5.12",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/email-reply-parser/LICENSE"
+    ]
+  },
+  {
+    "name": "idna",
+    "version": "3.19",
+    "license_expression": "BSD-3-Clause",
+    "files": [
+      "licenses/idna/LICENSE.md"
+    ]
+  },
+  {
+    "name": "markdown",
+    "version": "3.10.3",
+    "license_expression": "BSD-3-Clause",
+    "files": [
+      "licenses/markdown/LICENSE.md"
+    ]
+  },
+  {
+    "name": "nh3",
+    "version": "0.3.7",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/nh3/LICENSE"
+    ]
+  },
+  {
+    "name": "oauthlib",
+    "version": "3.3.1",
+    "license_expression": "BSD-3-Clause",
+    "files": [
+      "licenses/oauthlib/LICENSE"
+    ]
+  },
+  {
+    "name": "pycparser",
+    "version": "3.0",
+    "license_expression": "BSD-3-Clause",
+    "files": [
+      "licenses/pycparser/LICENSE"
+    ]
+  },
+  {
+    "name": "pywin32",
+    "version": "312",
+    "license_expression": "PSF",
+    "files": [
+      "licenses/pywin32/license.txt",
+      "licenses/pywin32/License.txt",
+      "licenses/pywin32/LICENSE",
+      "licenses/pywin32/README.txt",
+      "licenses/pywin32/License.txt",
+      "licenses/pywin32/License.txt",
+      "licenses/pywin32/LICENSE.txt",
+      "licenses/pywin32/License.txt"
+    ]
+  },
+  {
+    "name": "requests",
+    "version": "2.34.2",
+    "license_expression": "Apache-2.0",
+    "files": [
+      "licenses/requests/LICENSE",
+      "licenses/requests/NOTICE"
+    ]
+  },
+  {
+    "name": "requests-oauthlib",
+    "version": "2.0.0",
+    "license_expression": "ISC",
+    "files": [
+      "licenses/requests-oauthlib/LICENSE"
+    ]
+  },
+  {
+    "name": "soupsieve",
+    "version": "2.9.2",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/soupsieve/LICENSE.md"
+    ]
+  },
+  {
+    "name": "sqlparse",
+    "version": "0.6.0",
+    "license_expression": null,
+    "files": [
+      "licenses/sqlparse/AUTHORS",
+      "licenses/sqlparse/LICENSE"
+    ]
+  },
+  {
+    "name": "typing-extensions",
+    "version": "4.16.0",
+    "license_expression": "PSF-2.0",
+    "files": [
+      "licenses/typing-extensions/LICENSE"
+    ]
+  },
+  {
+    "name": "tzdata",
+    "version": "2026.4",
+    "license_expression": "Apache-2.0",
+    "files": [
+      "licenses/tzdata/LICENSE",
+      "licenses/tzdata/LICENSE_APACHE"
+    ]
+  },
+  {
+    "name": "urllib3",
+    "version": "2.7.0",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/urllib3/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "waitress",
+    "version": "3.0.2",
+    "license_expression": "ZPL 2.1",
+    "files": [
+      "licenses/waitress/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "whitenoise",
+    "version": "6.12.0",
+    "license_expression": "MIT",
+    "files": [
+      "licenses/whitenoise/LICENSE"
+    ]
+  }
+]

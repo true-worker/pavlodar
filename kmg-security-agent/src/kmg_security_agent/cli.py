@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 import time
@@ -30,6 +31,11 @@ def parser():
         cmd.add_argument('--timeout', type=int, default=1560)
         cmd.add_argument('--request-timeout', type=int, default=180)
         cmd.add_argument('--max-requests', type=int, default=25 if name == 'scan' else 40)
+        if name == 'scan':
+            cmd.add_argument('--mode', choices=('hybrid', 'static', 'llm'), default='hybrid',
+                             help='hybrid: правила + LLM (по умолчанию); static: только правила, без ключа; llm: только модель')
+            cmd.add_argument('--strict-llm', action='store_true',
+                             help='В режиме hybrid считать сбой модели ошибкой проверки (код 2) вместо вывода по правилам')
     return root
 
 
@@ -52,47 +58,109 @@ def _progress(message):
     print(message, file=sys.stderr, flush=True)
 
 
-def _run_scan(args, config, redactor):
+def _summary(report, output):
+    """Human-readable CI log: result, count and violated requirement IDs without opening artifacts."""
+    lines = ['=' * 72, f'KMG Security Agent: результат = {report["result"]}, код завершения = {report["exit_code"]}',
+             f'Нарушений ИБ: {report["finding_count"]}; нарушены требования: '
+             + (', '.join(report['violated_requirement_ids']) or 'нет')]
+    for check in report['requirements']:
+        count = sum(1 for f in report['findings'] if f['requirement_id'] == check['requirement_id'])
+        lines.append(f'  {check["requirement_id"]} {check["status"]:<20} находок: {count}  {check["title"]}')
+    extra = report.get('additional_findings', [])
+    if extra:
+        lines.append(f'Дополнительные замечания (не блокируют): {len(extra)}')
+    for error in report['errors']:
+        lines.append('Ошибка: ' + error)
+    lines += [f'Отчёт: {output / "report.md"}', '=' * 72]
+    print('\n'.join(lines), file=sys.stderr, flush=True)
+
+
+def _run_scan(args, config, redactor, config_error=None):
     from . import inventory, analysis, reporting
     repo = args.repo.expanduser().resolve()
     if not repo.is_dir():
         raise ConfigError('Путь --repo не является существующим каталогом')
     output, run_id = _fresh_output(args.output, [repo])
     started_at, started = _now(), time.monotonic()
-    client = LLMClient(config, timeout=args.timeout, request_timeout=args.request_timeout, max_requests=args.max_requests, progress=_progress)
+    mode, strict = getattr(args, 'mode', 'llm'), getattr(args, 'strict_llm', False)
+    model_name = config.model if config else None
+    client = LLMClient(config, timeout=args.timeout, request_timeout=args.request_timeout, max_requests=args.max_requests,
+                       progress=_progress) if config else None
+
+    def guard():
+        return client._deadline_guard() if client else nullcontext()
+
+    base_meta = {'run_id': run_id, 'started_at': started_at, 'model': model_name, 'agent_version': __version__, 'mode': mode}
     try:
-        with client._deadline_guard():
+        with guard():
             data = inventory.collect(repo, redactor)
     except (OSError, ValueError, BudgetError):
-        metadata = {'run_id': run_id, 'started_at': started_at, 'finished_at': _now(), 'duration_seconds': round(time.monotonic()-started, 3),
-                    'target': {'commit': None, 'dirty': None, 'content_hash': None}, 'model': config.model, 'agent_version': __version__}
+        metadata = dict(base_meta, finished_at=_now(), duration_seconds=round(time.monotonic()-started, 3),
+                        target={'commit': None, 'dirty': None, 'content_hash': None})
         reporting.write_results(output, metadata, [], {'schema_version': '1.0', 'files': [], 'chunks': []}, {},
                                 ['Не удалось безопасно прочитать репозиторий'], [], redactor)
         print(json.dumps({'exit_code': 2, 'output': str(output)}, ensure_ascii=False))
         return 2
     _progress(f'Прочитано файлов: {len(data["documents"])}; фрагментов: {len(data["chunks"])}')
-    with client._deadline_guard():
-        result = analysis.scan(client, data, _progress)
+
+    static_result, llm_result, llm_error = None, None, None
+    fatal_errors = list(data['errors'])
+    if mode in ('hybrid', 'static'):
+        _progress('Статические правила ИБ-01…ИБ-08')
+        static_result = analysis.static_checks(data)
+    if mode in ('hybrid', 'llm'):
+        if client is None:
+            llm_error = 'модель не настроена: ' + (config_error or 'нет ключа')
+        else:
+            try:
+                with guard():
+                    llm_result = analysis.scan(client, data, _progress)
+            except BudgetError as exc:
+                llm_error = str(exc)
+            if llm_result and (llm_result['errors'] or llm_result['external_error']):
+                llm_error = '; '.join(llm_result['errors'][:3]) or 'сбой внешнего сервиса'
+    if mode == 'llm' or (strict and llm_error):
+        checks = llm_result['checks'] if llm_result else []
+        errors = (llm_result['errors'] if llm_result else []) or ([llm_error] if llm_error else [])
+        external = bool(llm_result and llm_result['external_error']) or (llm_result is None)
+    else:
+        checks = analysis.combine(static_result, llm_result, llm_error)
+        errors, external = [], False
+        try:
+            fatal_errors += inventory.check_unchanged(data)
+        except (OSError, ValueError):
+            fatal_errors.append('Не удалось повторно проверить неизменность исходников')
+    errors = list(dict.fromkeys(fatal_errors + errors))
+
     manifest = inventory.public_manifest(data)
-    manifest['analysis_coverage'] = result['coverage']
-    completed = set(result['coverage']['completed_chunk_ids'])
+    coverage = (llm_result or {}).get('coverage') or {'expected_chunks': len(data['chunks']), 'completed_chunk_ids': []}
+    manifest['analysis_coverage'] = coverage
+    completed = set(coverage.get('completed_chunk_ids', []))
     for record in manifest['files']:
         if record['decision'] == 'analyze':
             ids = set(record.get('chunk_ids', []))
-            record['analysis_status'] = ('empty_source' if not ids and record.get('line_count') == 0 else 'completed' if ids and ids <= completed else 'partial' if ids & completed else 'not_reviewed')
-    metadata = {'run_id': run_id, 'started_at': started_at, 'finished_at': _now(), 'duration_seconds': round(time.monotonic()-started, 3),
-                'target': data['target'], 'model': config.model, 'agent_version': __version__, 'mode': 'static',
-                'coverage': result['coverage']}
-    client.deadline = time.monotonic() + 60
-    with client._deadline_guard():
-        report = reporting.write_results(output, metadata, result['checks'], manifest, client.usage, result['errors'],
-                 ['Статический анализ. Работоспособность развернутой среды и Windows ACL динамически не проверялись.',
-                  'Семантические выводы модели могут содержать ошибки; проверка цитаты подтверждает только расположение кода.'],
-                 redactor, external_error=result['external_error'])
-    code = report['exit_code']
-    print(redactor(json.dumps({'exit_code': code, 'output': str(output), 'findings': len(report.get('findings', [])),
-                              'requests': client.usage['requests'], 'violated_requirements': [c['requirement_id'] for c in result['checks'] if c['status'] == 'violated']}, ensure_ascii=False)), flush=True)
-    return code
+            record['analysis_status'] = ('empty_source' if not ids and record.get('line_count') == 0 else 'completed' if ids and ids <= completed
+                                         else 'partial' if ids & completed else 'static_rules_only' if static_result else 'not_reviewed')
+    metadata = dict(base_meta, finished_at=_now(), duration_seconds=round(time.monotonic()-started, 3), target=data['target'],
+                    coverage={'files_read': len(data['documents']), 'chunks': len(data['chunks']),
+                              'llm_chunks_reviewed': len(completed), 'llm_error': llm_error},
+                    additional_findings=(static_result or {}).get('additional_findings', []),
+                    static_rules_version=(static_result or {}).get('rules_version'),
+                    route_map=(static_result or {}).get('routes', []))
+    limitations = ['Статический анализ: код проверяемого проекта не запускается; права Windows ACL и среда развёртывания динамически не проверялись.',
+                   'Цитаты и номера строк проверены детерминированно; семантические выводы LLM могут содержать ошибки.']
+    if llm_error and mode == 'hybrid' and not strict:
+        limitations.append('LLM-анализ не завершён (' + llm_error + '); итог основан на детерминированных правилах.')
+    if client:
+        client.deadline = time.monotonic() + 60
+    with guard():
+        report = reporting.write_results(output, metadata, checks, manifest, client.usage if client else {'requests': 0},
+                                         errors, limitations, redactor, external_error=external)
+    _summary(report, output)
+    print(redactor(json.dumps({'exit_code': report['exit_code'], 'output': str(output), 'findings': report['finding_count'],
+                               'violated_requirements': report['violated_requirement_ids'],
+                               'requests': client.usage['requests'] if client else 0}, ensure_ascii=False)), flush=True)
+    return report['exit_code']
 
 
 def _run_evaluate(args, config, redactor):
@@ -163,6 +231,17 @@ def main(argv=None):
             raise ConfigError('--timeout должен быть от 1 до 1620 секунд (резерв на отчёт до предела 30 минут)')
         if args.command != 'doctor' and (args.request_timeout < 1 or args.max_requests < 1):
             raise ConfigError('Лимиты запросов должны быть положительными')
+        if args.command == 'scan' and args.mode != 'llm':
+            try:
+                config = load_config(args.env_file) if args.mode == 'hybrid' else None
+            except ConfigError as exc:
+                if args.strict_llm:
+                    raise
+                _progress(f'LLM недоступна ({exc}); проверка выполняется детерминированными правилами')
+                return _run_scan(args, None, redactor, str(exc))
+            if config is not None:
+                redactor = Redactor(config.api_key)
+            return _run_scan(args, config, redactor)
         config = load_config(args.env_file)
         redactor = Redactor(config.api_key)
         if args.command == 'doctor':

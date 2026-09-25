@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from .readers import ReadError, open_directory, read_bytes, read_document, stat_signature
+from .readers import SECURE_FS, FS_MODE, ReadError, is_link_like, open_directory, read_bytes, read_document, stat_signature
 
 # A directory entry represents the complete excluded subtree. It is deliberately
 # not enumerated: enumerating .git/objects or a virtualenv is not source coverage.
@@ -68,6 +68,8 @@ def classify(path: str, directory: bool = False) -> tuple[str, str, str]:
 
 
 def _walk(root: Path) -> tuple[list[dict], list[str], tuple[int, ...] | None]:
+    if not SECURE_FS:
+        return _walk_portable(root)
     records, errors = [], []
     root_identity = None
     try:
@@ -128,6 +130,60 @@ def _walk(root: Path) -> tuple[list[dict], list[str], tuple[int, ...] | None]:
             visit(root_fd)
     except (OSError, ReadError) as exc:
         errors.append(f'Cannot safely enumerate repository: {type(exc).__name__}')
+    return records, errors, root_identity
+
+
+def _walk_portable(root: Path) -> tuple[list[dict], list[str], tuple[int, ...] | None]:
+    """Windows walker: same classification, never descends into links/junctions."""
+    records, errors = [], []
+    try:
+        root_identity = stat_signature(os.stat(root))[:2]
+    except OSError as exc:
+        return [], [f'Cannot safely enumerate repository: {type(exc).__name__}'], None
+
+    def visit(directory: Path, prefix: str = '', depth: int = 0):
+        if depth > 64:
+            errors.append(f'{prefix}: directory depth exceeds safe inventory limit')
+            return
+        try:
+            with os.scandir(directory) as iterator:
+                entries = sorted(iterator, key=lambda entry: entry.name)
+        except OSError:
+            errors.append(f'{prefix or "."}: directory cannot be enumerated')
+            return
+        for entry in entries:
+            if len(records) >= 100_000:
+                errors.append('Inventory exceeds 100000 entries; coverage is incomplete')
+                return
+            path = f'{prefix}/{entry.name}' if prefix else entry.name
+            try:
+                info = os.lstat(entry.path)
+            except OSError:
+                records.append({'path': path, 'decision': 'analyze', 'kind': 'unknown',
+                                'status': 'error', 'reason': 'Cannot stat filesystem entry', 'size': None, 'sha256': None, 'chunk_ids': []})
+                errors.append(f'{path}: filesystem metadata is inaccessible')
+                continue
+            if is_link_like(info):
+                records.append({'path': path, 'decision': 'exclude', 'kind': 'symlink',
+                                'status': 'excluded', 'reason': 'Symbolic links, junctions and reparse points are never followed',
+                                'size': info.st_size, 'sha256': None, 'chunk_ids': [], '_stat': stat_signature(info)})
+                continue
+            is_dir = stat.S_ISDIR(info.st_mode)
+            decision, kind, reason = classify(path, is_dir)
+            if not is_dir and not stat.S_ISREG(info.st_mode):
+                decision, kind, reason = 'exclude', 'special_file', 'Socket, FIFO or device; never opened'
+            if decision == 'traverse':
+                visit(Path(entry.path), path, depth + 1)
+                continue
+            record = {'path': path, 'kind': kind, 'size': info.st_size,
+                      'decision': decision, 'reason': reason, 'sha256': None, 'chunk_ids': [],
+                      'status': 'excluded' if decision == 'exclude' else 'pending',
+                      '_stat': stat_signature(info)}
+            if is_dir:
+                record['scope'] = 'subtree'
+            records.append(record)
+
+    visit(Path(root))
     return records, errors, root_identity
 
 
@@ -223,9 +279,9 @@ def _git(root: Path, records: list[dict]) -> dict:
             mode, digest = staged
             if record.get('_git_blob', {}).get(algorithm) is None:
                 unknown = True
-            elif record['_git_blob'][algorithm] != digest:
+            elif digest not in (record['_git_blob'][algorithm], record.get('_git_blob_lf', {}).get(algorithm)):
                 dirty = True
-            if record.get('_stat') and mode in {'100644', '100755'}:
+            if os.name != 'nt' and record.get('_stat') and mode in {'100644', '100755'}:
                 executable = bool(record['_stat'][2] & 0o111)
                 if executable != (mode == '100755'):
                     dirty = True
@@ -290,6 +346,11 @@ def collect(repo: Path, redactor: Callable[[str], str], max_file_bytes: int = 2_
             record['sha256'] = hashlib.sha256(payload).hexdigest()
             blob = f'blob {len(payload)}\0'.encode() + payload
             record['_git_blob'] = {name: hashlib.new(name, blob).hexdigest() for name in ('sha1', 'sha256')}
+            if b'\r\n' in payload:
+                # Windows checkouts (core.autocrlf) keep CRLF on disk while Git stores LF.
+                normalized = payload.replace(b'\r\n', b'\n')
+                lf_blob = f'blob {len(normalized)}\0'.encode() + normalized
+                record['_git_blob_lf'] = {name: hashlib.new(name, lf_blob).hexdigest() for name in ('sha1', 'sha256')}
             if record['decision'] == 'resource':
                 record['status'] = 'resource'
                 continue
@@ -312,6 +373,7 @@ def collect(repo: Path, redactor: Callable[[str], str], max_file_bytes: int = 2_
     target = _git(root, records)
     target['content_hash'] = hashlib.sha256(json.dumps(digest_entries, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
     target['content_hash_scope'] = 'all included readable bytes plus explicit unread/error records; excludes secrets'
+    target['filesystem_mode'] = FS_MODE
     return {'root': str(root), 'target': target, 'files': records,
             'documents': documents, 'chunks': chunks, 'errors': [redactor(error) for error in errors],
             '_snapshot': {'root_identity': root_identity, 'max_file_bytes': max_file_bytes}}

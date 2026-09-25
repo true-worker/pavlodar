@@ -20,13 +20,60 @@ def stat_signature(value: os.stat_result) -> tuple[int, ...]:
             value.st_mtime_ns, value.st_ctime_ns)
 
 
+# POSIX (Linux/macOS): race-free openat()/O_NOFOLLOW traversal.
+# Windows has no dir_fd API, so a portable path-based reader is used instead:
+# links/junctions/reparse points are still never followed, and every read is
+# bracketed by stat checks. The remaining check-then-open window is documented.
+SECURE_FS = (hasattr(os, 'O_NOFOLLOW') and hasattr(os, 'O_DIRECTORY')
+             and os.open in os.supports_dir_fd)
+FS_MODE = 'posix_openat_nofollow' if SECURE_FS else 'portable_path_checks'
+
+
+def is_link_like(info: os.stat_result) -> bool:
+    """Symlink, junction or any other Windows reparse point."""
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    attributes = getattr(info, 'st_file_attributes', 0)
+    return bool(attributes & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400))
+
+
+def _portable_path(repo: Path, parts: tuple[str, ...]) -> Path:
+    current = Path(repo)
+    for part in parts:
+        current = current / part
+        info = os.lstat(current)
+        if is_link_like(info):
+            raise ReadError('Links and reparse points are never followed')
+    return current
+
+
+def _read_bytes_portable(repo: Path, parts: tuple[str, ...], limit: int) -> tuple[bytes, os.stat_result]:
+    path = _portable_path(repo, parts)
+    named_before = os.lstat(path)
+    if not stat.S_ISREG(named_before.st_mode):
+        raise ReadError('Not a regular file')
+    if named_before.st_size > limit:
+        raise ReadError(f'File exceeds the {limit}-byte read limit; not read')
+    with open(path, 'rb') as handle:
+        before = os.fstat(handle.fileno())
+        if stat_signature(before)[:4] != stat_signature(named_before)[:4]:
+            raise ReadError('File was replaced before reading')
+        payload = handle.read(limit + 1)
+        if len(payload) > limit:
+            raise ReadError(f'File grew beyond the {limit}-byte read limit')
+        after = os.fstat(handle.fileno())
+    if stat_signature(before) != stat_signature(after):
+        raise ReadError('File changed while being read')
+    named_after = os.lstat(path)
+    if is_link_like(named_after) or stat_signature(named_after)[:4] != stat_signature(after)[:4]:
+        raise ReadError('File was replaced while being read')
+    return payload, named_after
+
+
 @contextmanager
 def open_directory(path: Path):
-    # Fail closed on platforms without openat/no-follow. Checking is_symlink()
-    # and then opening the path would leave a traversal race.
-    if (not hasattr(os, 'O_NOFOLLOW') or not hasattr(os, 'O_DIRECTORY')
-            or os.open not in os.supports_dir_fd):
-        raise ReadError('This platform lacks the required no-follow filesystem API')
+    if not SECURE_FS:
+        raise ReadError('open_directory requires the POSIX no-follow API; use the portable walker')
     absolute = Path(path).absolute()
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     fd = os.open(absolute.anchor, flags)
@@ -45,6 +92,8 @@ def read_bytes(repo: Path, relative: str, limit: int) -> tuple[bytes, os.stat_re
     parts = PurePosixPath(relative).parts
     if not parts or any(part in ('', '.', '..') for part in parts) or parts[0] == '/':
         raise ReadError('Invalid repository-relative path')
+    if not SECURE_FS:
+        return _read_bytes_portable(Path(repo), parts, limit)
     with open_directory(repo) as root_fd:
         current = os.dup(root_fd)
         try:

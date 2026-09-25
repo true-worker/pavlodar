@@ -1,0 +1,15 @@
+{% load i18n humanize %}
+
+<div class="d-grid">
+  <button class="btn bg-secondary-subtle text-secondary-emphasis"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#collapseKeywords"
+          aria-expanded="false"
+          aria-controls="collapseKeywords">{% translate "Keywords" %}</button>
+</div>
+<div class="collapse my-3" id="collapseKeywords">
+  <label class="form-label" for="id_query">{% translate "Keywords" %}</label>
+  <input class="form-control" type="text" name="q" value="{{ query_params.search_string }}" id="id_query" />
+  <div class="form-text">{% translate "Keywords are case-insensitive, and will be looked for pretty much everywhere possible. Prepend with 'queue:' or 'priority:' to search by queue or priority. You can also use the keyword OR to combine multiple searches." %}</div>
+</div>

@@ -1,0 +1,59 @@
+{% extends "helpdesk/base.html" %}
+{% load i18n %}
+
+{% block helpdesk_title %}
+  {% translate "Saved Queries" %}
+{% endblock %}
+
+{% block helpdesk_breadcrumb %}
+  <li class="breadcrumb-item">
+    <a href="{% url 'helpdesk:list' %}">{% translate "Tickets" %}</a>
+  </li>
+  <li class="breadcrumb-item active">{% translate "Saved Queries" %}</li>
+{% endblock %}
+
+{% block helpdesk_body %}
+  <div class="container mt-4">
+    <h3 class="mb-4">{% translate "Saved Queries" %}</h3>
+
+    {% if saved_queries %}
+      <ul class="list-group">
+        {% for q in saved_queries %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+              <a href="{% url 'helpdesk:list' %}?saved_query={{ q.id }}" class="text-decoration-none">
+                {{ q.title }}
+                {% if q.shared %}
+                  <small class="text-muted ms-2 fst-italic">
+                    {% if q.user == user %}
+                      ({% translate "Shared" %})
+                    {% else %}
+                      ({% translate "Shared by" %} {{ q.user.get_username }})
+                    {% endif %}
+                  </small>
+                {% endif %}
+              </a>
+            </div>
+            <div class="d-flex">
+              <a href="{% url 'helpdesk:list' %}?saved_query={{ q.id }}"
+                 class="btn btn-sm btn-outline-primary me-2"
+                 title="{% translate 'Run this query' %}">
+                <i class="fas fa-play"></i> {% translate "Run" %}
+              </a>
+
+              {% if q.user == user %}
+                <a href="{% url 'helpdesk:delete_query' q.id %}"
+                   class="btn btn-sm btn-outline-danger"
+                   title="{% translate 'Delete this query' %}">
+                  <i class="fas fa-trash"></i>
+                </a>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>{% translate "No saved queries found." %}</p>
+    {% endif %}
+  </div>
+{% endblock %}
